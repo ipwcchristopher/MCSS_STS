@@ -1,0 +1,96 @@
+# MCSS Criteria Configuration
+# All values derived from MCSS spec (Minervini SEPA + CANSLIM)
+# Last updated: 2026-05-25
+
+gate_0:
+  spy_above_ema200: true
+  qqq_above_ema200: true
+  spy_ema50_above_ema200: true
+  vix_max: 30
+
+l1_universe:
+  min_price: 10
+  min_avg_volume_20d: 2000000
+  min_market_cap: 500000000
+  max_distance_from_52w_high_pct: 35
+  exclude_types:
+    - ETF
+    - SPAC
+    - Warrant
+    - ADR
+
+l2_fundamental:
+  min_revenue_growth_yoy_pct: 15
+  require_revenue_growth_acceleration: true
+  require_eps_acceleration_consecutive_quarters: 2
+  require_profit_margin_expanding: true
+  min_gross_margin_pct: 35
+  min_institutional_ownership_pct: 40
+  max_pe: 150
+
+l3_technical:
+  price_above_ema20: true
+  price_above_ema50: true
+  price_above_ema150: true
+  price_above_ema200: true
+  ema50_above_ema150: true
+  ema150_above_ema200: true
+  ema200_uptrend_lookback_days: 21
+  max_distance_from_52w_high_pct: 25
+  min_rs_rating: 70
+  min_rsi14: 45
+  max_rsi14: 72
+  min_volume_ratio_vs_avg20d: 1.2
+  min_vcp_score: 60
+  vcp_optional: true
+
+l4_scoring:
+  rs_rating_score_max: 20
+  rs_rating_high_threshold: 80
+  rs_rating_high_points: 20
+  rs_rating_low_points: 14
+  quality_score_max: 25
+  momentum_score_max: 25
+  vcp_tightness_score_max: 15
+  volatility_score_max: 10
+  value_score_max: 5
+  short_squeeze_bonus_max: 5
+  short_squeeze_min_float_pct: 15
+  min_total_score: 60
+  top_n: 12
+
+l5_catalyst:
+  analyst_upgrade_window_days: 7
+  analyst_upgrade_points: 2
+  earnings_beat_min_pct: 10
+  earnings_beat_points: 2
+  insider_buying_window_days: 30
+  insider_buying_points: 1
+  news_positive_points: 1
+  sector_rs_strong_points: 1
+  vcp_breakout_points: 1
+  major_negative_news_points: -3
+  analyst_downgrade_window_days: 7
+  analyst_downgrade_points: -2
+  top_n_final: 5
+
+position_sizing:
+  risk_per_trade_pct: 2
+  stop_atr_multiplier: 1.5
+  max_position_pct: 25
+  earnings_play_max_position_pct: 10
+  earnings_play_stop_atr_multiplier: 1.0
+
+guardrails:
+  fomo_rsi_block: 72
+  stop_loss_alert_pct: -3
+  stop_loss_must_action_pct: -5
+  suppress_sell_gain_pct: 3
+  halt_new_entries_portfolio_drawdown_pct: 10
+  max_monthly_trades: 15
+  max_concurrent_positions: 6
+
+earnings_play_pool:
+  earnings_within_days: 5
+  min_eps_surprise_beat_pct: 3
+  eps_surprise_lookback_quarters: 3

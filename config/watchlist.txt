@@ -1,0 +1,4 @@
+# Personal watchlist — add tickers one per line
+# Example:
+# NVDA
+# AAPL
