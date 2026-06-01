@@ -48,6 +48,107 @@ def _position_sizing(price: float, atr: float, cfg: Dict) -> Dict[str, float]:
 
 # ── Report formatting ──────────────────────────────────────────────────────────
 
+def _fmt_pct(val: Any, mult: bool = True) -> str:
+    """Format a ratio (0.27 → +27.6%) or pct (27.6 → +27.6%)."""
+    try:
+        v = float(val)
+        v = v * 100 if mult else v
+        sign = "+" if v >= 0 else ""
+        return f"{sign}{v:.1f}%"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _fmt_billions(val: Any) -> str:
+    try:
+        v = float(val)
+        if v >= 1e9:
+            return f"${v/1e9:.1f}B"
+        if v >= 1e6:
+            return f"${v/1e6:.0f}M"
+        return f"${v:,.0f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _format_stock_block(rank: int, row: Any, pos_cfg: Dict) -> str:
+    ticker      = str(row.get("ticker", "?"))
+    long_name   = str(row.get("long_name", ticker))[:38]
+    sector      = str(row.get("sector", ""))
+    industry    = str(row.get("industry", ""))
+    final_score = float(row.get("final_score", row.get("total_score", 0)))
+    rs          = int(row.get("rs_rating", 0))
+    rsi         = float(row.get("rsi14", 0))
+    price       = float(row.get("price", 0))
+    atr         = float(row.get("atr", 0))
+    dist        = float(row.get("dist_from_52wh_pct", 0))
+    vol_ratio   = float(row.get("volume_ratio", 0))
+    vcp         = str(row.get("vcp_detected", "False")).lower() == "true"
+    earnings_play = str(row.get("earnings_play", "False")).lower() == "true"
+    catalyst_notes = str(row.get("catalyst_notes", ""))
+
+    # Sub-scores
+    s_rs   = int(row.get("score_rs", 0))
+    s_qual = int(row.get("score_quality", 0))
+    s_mom  = int(row.get("score_momentum", 0))
+    s_vcp  = int(row.get("score_vcp", 0))
+    s_vol  = int(row.get("score_volatility", 0))
+    s_val  = int(row.get("score_value", 0))
+    s_sqz  = int(row.get("score_short_squeeze_bonus", 0))
+
+    # Fundamentals
+    rev_growth = _fmt_pct(row.get("revenue_growth"))
+    gross_margin = _fmt_pct(row.get("gross_margins"))
+    roe = _fmt_pct(row.get("return_on_equity"))
+    fcf = _fmt_billions(row.get("free_cashflow"))
+    inst_own = _fmt_pct(row.get("institutional_ownership"))
+    fwd_pe = row.get("forward_pe")
+    fwd_pe_str = f"{float(fwd_pe):.1f}x" if fwd_pe and str(fwd_pe) not in ("nan", "None") else "N/A"
+    mkt_cap = _fmt_billions(row.get("market_cap"))
+
+    sizing = _position_sizing(price, atr, pos_cfg)
+
+    # Technical signal bullets
+    rsi_note = "強勢但未過熱" if rsi <= 70 else "接近過熱邊緣，留意"
+    dist_note = "接近高位整固" if dist < 10 else ("中位回調" if dist < 20 else "距高位較遠")
+    vol_note = f"{vol_ratio:.1f}x 平均" + (" (資金流入)" if vol_ratio >= 1.5 else "")
+
+    lines = [
+        f"{'━'*22}",
+        f"<b>#{rank} {ticker}</b> — {long_name}",
+        f"<b>綜合評分: {final_score:.0f}/105</b>  |  市值: {mkt_cap}",
+        f"板塊: {sector} · {industry}",
+        "",
+        "📈 <b>技術信號</b>",
+        f"  • RS評級: <b>{rs}</b>/99 — 跑贏全市 {rs}% 股票",
+        f"  • RSI(14): {rsi:.1f} — {rsi_note}",
+        f"  • 成交量: {vol_note}",
+        f"  • 距52週高: -{dist:.1f}% — {dist_note}",
+        f"  • 趨勢模板: ✅ EMA20>50>150>200 多頭排列" + (" | VCP收縮形態" if vcp else ""),
+        "",
+        "💰 <b>基本面快照</b>",
+        f"  • 收入增長: <b>{rev_growth}</b> YoY",
+        f"  • 毛利率: {gross_margin}  |  ROE: {roe}",
+        f"  • 自由現金流: {fcf}  |  預測PE: {fwd_pe_str}",
+        f"  • 機構持股: {inst_own}",
+        "",
+        "🏆 <b>評分細分</b>",
+        f"  RS動能:{s_rs} + 質素:{s_qual} + 動量:{s_mom} + VCP:{s_vcp} + 波幅:{s_vol} + 估值:{s_val}" + (f" + 軋空+{s_sqz}" if s_sqz else ""),
+        "",
+        "📍 <b>交易設置</b>",
+        f"  入場: <b>${sizing['entry']:.2f}</b>",
+        f"  止損: ${sizing['stop']:.2f} (-{sizing['risk_pct']}%)  [ATR×1.5 = ${atr:.2f}]",
+        f"  目標: ${sizing['target']:.2f} (+{sizing['gain_pct']}%)  [2:1 風險回報]",
+    ]
+
+    if catalyst_notes and catalyst_notes not in ("dry-run", "GEMINI_API_KEY not set — skipped", ""):
+        lines.append(f"  Catalyst: {catalyst_notes[:120]}")
+    if earnings_play:
+        lines.append("  ⚠️ <b>EARNINGS RISK</b> — 倉位減半，止損收緊")
+
+    return "\n".join(lines)
+
+
 def _format_report(
     top5: pd.DataFrame,
     session: str,
@@ -58,42 +159,26 @@ def _format_report(
 ) -> str:
     pos_cfg = cfg.get("position_sizing", {})
     today_fmt = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    session_label = "開市前" if "pre" in session else "收市後"
 
-    lines = [
-        f"<b>MCSS Daily Screen — {today_fmt} ({session.replace('-', ' ').title()})</b>",
-        f"Universe: {universe_size} → L3: {l3_passed} → Top {len(top5)}",
+    header = "\n".join([
+        f"<b>📊 MCSS 每日篩選 — {today_fmt} ({session_label})</b>",
+        f"篩選漏斗: {universe_size}隻 → L3通過: {l3_passed}隻 → Top {len(top5)}",
         "",
-        "<b>Top Swing Candidates</b>",
-        "",
+        "<b>今日入選股票</b>",
+    ])
+
+    blocks = [
+        _format_stock_block(rank, row, pos_cfg)
+        for rank, (_, row) in enumerate(top5.iterrows(), start=1)
     ]
 
-    for rank, (_, row) in enumerate(top5.iterrows(), start=1):
-        ticker = str(row.get("ticker", "?"))
-        long_name = str(row.get("long_name", ticker))
-        sector = str(row.get("sector", ""))
-        final_score = float(row.get("final_score", row.get("total_score", 0)))
-        rs = int(row.get("rs_rating", 0))
-        rsi = float(row.get("rsi14", 0))
-        price = float(row.get("price", 0))
-        atr = float(row.get("atr", 0))
-        catalyst_notes = str(row.get("catalyst_notes", ""))
-        earnings_play = str(row.get("earnings_play", "False")).lower() == "true"
-        dist = float(row.get("dist_from_52wh_pct", 0))
+    footer = "\n".join([
+        f"{'━'*22}",
+        "<i>純系統輸出，非投資建議。所有決定請自行判斷。</i>",
+    ])
 
-        sizing = _position_sizing(price, atr, pos_cfg)
-
-        lines.append(f"{rank}. <b>{ticker}</b> — {long_name[:40]}")
-        lines.append(f"   Score: <b>{final_score:.0f}</b> | RS: {rs} | RSI: {rsi:.1f} | Sector: {sector}")
-        lines.append(f"   <b>Entry:</b> ${sizing['entry']:.2f} | <b>Stop:</b> ${sizing['stop']:.2f} (-{sizing['risk_pct']}%) | <b>Target:</b> ${sizing['target']:.2f} (+{sizing['gain_pct']}%)")
-        lines.append(f"   From 52w High: -{dist:.1f}%")
-        if catalyst_notes and catalyst_notes not in ("dry-run", "GEMINI_API_KEY not set — skipped", ""):
-            lines.append(f"   Catalyst: {catalyst_notes[:120]}")
-        if earnings_play:
-            lines.append(f"   ⚠️ EARNINGS RISK — reduce size, tighten stop")
-        lines.append("")
-
-    lines.append("<i>Not financial advice. System output only. Apply own judgment.</i>")
-    return "\n".join(lines)
+    return "\n".join([header] + blocks + [footer])
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
