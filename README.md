@@ -199,7 +199,7 @@ mcss_project/
 - [x] **Phase 2**: L3 技術 + Trend Template + RS Rating (Week 3–4)
 - [x] **Phase 3**: L4 Quant Scoring + L5 AI Catalyst (Week 5–6)
 - [x] **Phase 4**: Telegram Bot + GitHub Actions 部署 (Week 7)
-- [ ] **Phase 5**: Backtesting + 優化 (Week 8–10)
+- [x] **Phase 5**: Backtesting + 優化 (Week 8–10)
 - [ ] **Phase 6**: IBKR Auto Trading (未來，可選)
 
 詳細規格見 [`CLAUDE.md`](./CLAUDE.md)。

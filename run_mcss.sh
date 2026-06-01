@@ -1,19 +1,43 @@
 #!/usr/bin/env bash
 # MCSS Manual Run Script (local development)
-# Usage: ./run_mcss.sh [--dry-run] [--session=pre-market|post-market]
+# Usage:
+#   ./run_mcss.sh [--dry-run] [--session=pre-market|post-market]
+#   ./run_mcss.sh --backtest [--dry-run] [--refresh-cache]
 # Auth:  claude auth login  (uses Claude.ai subscription, no API key needed)
 
 set -e
 
 DRY_RUN=""
 SESSION="post-market"
+BACKTEST=""
+REFRESH_CACHE=""
 
 for arg in "$@"; do
   case $arg in
-    --dry-run) DRY_RUN="true" ;;
-    --session=*) SESSION="${arg#*=}" ;;
+    --dry-run)       DRY_RUN="true" ;;
+    --session=*)     SESSION="${arg#*=}" ;;
+    --backtest)      BACKTEST="true" ;;
+    --refresh-cache) REFRESH_CACHE="true" ;;
   esac
 done
+
+# ── Backtest mode ────────────────────────────────────────────────────────────
+if [ -n "$BACKTEST" ]; then
+  echo "==================================="
+  echo "MCSS Phase 5 — Backtesting Engine"
+  echo "Date: $(date +%Y-%m-%d)"
+  echo "==================================="
+  ARGS=""
+  [ -n "$DRY_RUN" ]       && ARGS="$ARGS --dry-run"
+  [ -n "$REFRESH_CACHE" ] && ARGS="$ARGS --refresh-cache"
+  .venv/bin/python scripts/backtest.py $ARGS
+  echo "==================================="
+  echo "Backtest complete. Check:"
+  echo "  data/backtest_report.html"
+  echo "  data/backtest_trades.csv"
+  echo "==================================="
+  exit 0
+fi
 
 echo "==================================="
 echo "MCSS Daily Screen"

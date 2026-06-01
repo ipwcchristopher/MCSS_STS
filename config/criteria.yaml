@@ -94,3 +94,10 @@ earnings_play_pool:
   earnings_within_days: 5
   min_eps_surprise_beat_pct: 3
   eps_surprise_lookback_quarters: 3
+
+backtest:
+  initial_capital: 100000
+  warmup_days: 260
+  window_days: 252
+  reward_ratio: 2.0
+  rs_recompute_interval_days: 5
