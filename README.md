@@ -195,10 +195,10 @@ mcss_project/
 
 - [x] 需求分析（100條問卷）
 - [x] Screening Criteria v2 確認
-- [ ] **Phase 1**: 數據基建 + L1/L2 (Week 1–2)
-- [ ] **Phase 2**: L3 技術 + Trend Template + RS Rating (Week 3–4)
-- [ ] **Phase 3**: L4 Quant Scoring + L5 AI Catalyst (Week 5–6)
-- [ ] **Phase 4**: Telegram Bot + GitHub Actions 部署 (Week 7)
+- [x] **Phase 1**: 數據基建 + L1/L2 (Week 1–2)
+- [x] **Phase 2**: L3 技術 + Trend Template + RS Rating (Week 3–4)
+- [x] **Phase 3**: L4 Quant Scoring + L5 AI Catalyst (Week 5–6)
+- [x] **Phase 4**: Telegram Bot + GitHub Actions 部署 (Week 7)
 - [ ] **Phase 5**: Backtesting + 優化 (Week 8–10)
 - [ ] **Phase 6**: IBKR Auto Trading (未來，可選)
 
