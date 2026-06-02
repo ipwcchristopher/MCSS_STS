@@ -225,7 +225,25 @@ def main() -> None:
         return
 
     if top5.empty or "ticker" not in top5.columns:
-        print("No tickers in Top 5. Skipping report.")
+        print("No tickers in Top 5. Sending empty-result notification.")
+        today_fmt = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        session_label = "開市前" if "pre" in args.session else "收市後"
+        empty_msg = "\n".join([
+            f"<b>📊 MCSS 每日篩選 — {today_fmt} ({session_label})</b>",
+            "",
+            "今日篩選結果：<b>0 隻股票</b>符合入選條件。",
+            "",
+            "可能原因：",
+            "  • 大市整體偏弱，多數股票跌穿均線",
+            "  • 資料源（yfinance）部分數據暫時不可用",
+            "  • 當前市況不適合入場，建議持現金觀望",
+            "",
+            "<i>純系統輸出，非投資建議。</i>",
+        ])
+        dry = args.dry_run or not os.environ.get("TELEGRAM_BOT_TOKEN")
+        send_message(empty_msg, dry_run=dry)
+        if not dry:
+            print("Empty-result Telegram notification sent.")
         return
 
     print(f"Formatting report for {len(top5)} tickers...")
