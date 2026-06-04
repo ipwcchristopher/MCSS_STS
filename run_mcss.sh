@@ -3,14 +3,25 @@
 # Usage:
 #   ./run_mcss.sh [--dry-run] [--session=pre-market|post-market]
 #   ./run_mcss.sh --backtest [--dry-run] [--refresh-cache]
+#   ./run_mcss.sh --bot          start Telegram bot (on-demand trigger)
 # Auth:  claude auth login  (uses Claude.ai subscription, no API key needed)
 
 set -e
+
+# Load .env if present (local secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, etc.)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  # shellcheck source=.env
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
 
 DRY_RUN=""
 SESSION="post-market"
 BACKTEST=""
 REFRESH_CACHE=""
+BOT=""
 
 for arg in "$@"; do
   case $arg in
@@ -18,8 +29,21 @@ for arg in "$@"; do
     --session=*)     SESSION="${arg#*=}" ;;
     --backtest)      BACKTEST="true" ;;
     --refresh-cache) REFRESH_CACHE="true" ;;
+    --bot)           BOT="true" ;;
   esac
 done
+
+# ── Bot mode ─────────────────────────────────────────────────────────────────
+if [ -n "$BOT" ]; then
+  echo "==================================="
+  echo "MCSS Telegram Bot"
+  echo "Date: $(date +%Y-%m-%d)"
+  echo "Send /run in Telegram to trigger pipeline."
+  echo "Press Ctrl+C to stop."
+  echo "==================================="
+  .venv/bin/python scripts/telegram_bot.py
+  exit 0
+fi
 
 # ── Backtest mode ────────────────────────────────────────────────────────────
 if [ -n "$BACKTEST" ]; then

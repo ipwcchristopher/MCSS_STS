@@ -1,6 +1,6 @@
 """MCSS Phase 2 — L3 Technical Filter (Minervini Trend Template + RS + RSI + Volume).
 
-Input:  data/l2_fundamental_passed.csv
+Input:  data/l1_passed.csv
 Output: data/l3_technical_passed.csv
         data/l3_excluded.csv
         data/technical_filter_summary.json
@@ -254,7 +254,7 @@ def _apply_l3_filter(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default="data/l2_fundamental_passed.csv")
+    parser.add_argument("--input", default="data/l1_passed.csv")
     parser.add_argument("--output-dir", default="data")
     args = parser.parse_args()
 

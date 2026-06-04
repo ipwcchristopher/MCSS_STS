@@ -2,9 +2,16 @@
 Fetch raw market data for MCSS universe.
 No screening logic — returns raw OHLCV + fundamental data.
 
-Universe source: NASDAQ Trader FTP (nasdaqlisted.txt + otherlisted.txt)
-Covers NYSE, NASDAQ, AMEX (~7000-9000 stocks). Free, no API key required.
-Falls back to S&P 500 Wikipedia if FTP is unreachable.
+Primary source (when ALPACA_API_KEY + ALPACA_API_SECRET are set):
+  Alpaca /v2/assets → snapshots → 1-year bars (~10,000 → ~800 in seconds)
+
+Fallback source (no Alpaca creds):
+  NASDAQ Trader FTP (nasdaqlisted.txt + otherlisted.txt)
+  Covers NYSE, NASDAQ, AMEX (~7000-9000 stocks). Free, no API key required.
+  Falls back to S&P 500 Wikipedia if FTP is unreachable.
+
+Fundamentals (market_cap, PE, sector, etc.) always come from yfinance.info —
+Alpaca pre-filter reduces the candidate pool so only ~800 tickers need .info.
 
 Usage:
     python scripts/fetch_universe.py [--output data/universe_raw.csv]
@@ -13,8 +20,10 @@ Usage:
 """
 import argparse
 import concurrent.futures
+import os
 import threading
 import time
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -23,6 +32,9 @@ import pandas as pd
 import requests
 import yaml
 import yfinance as yf
+
+ALPACA_KEY    = os.environ.get("ALPACA_API_KEY", "")
+ALPACA_SECRET = os.environ.get("ALPACA_API_SECRET", "")
 
 
 # ── Ticker list from NASDAQ FTP ────────────────────────────────────────────────
@@ -149,6 +161,105 @@ def get_all_us_tickers() -> List[str]:
 
     print("  Trying S&P 500 Wikipedia fallback...")
     return _get_sp500_fallback()
+
+
+# ── Alpaca primary source ─────────────────────────────────────────────────────
+
+def _alpaca_get_all_tickers() -> List[str]:
+    """Get all active tradable US equity symbols via Alpaca Trading API."""
+    from alpaca.trading.client import TradingClient
+
+    client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=True)
+    assets = client.get_all_assets()
+    symbols = [
+        a.symbol for a in assets
+        if a.asset_class.value == "us_equity"
+        and a.status.value == "active"
+        and a.tradable
+        and _is_common_equity(a.symbol)
+    ]
+    print(f"  Alpaca assets: {len(symbols)} active US equities")
+    return sorted(symbols)
+
+
+def _alpaca_snapshot_prefilter(
+    tickers: List[str],
+    min_price: float,
+    min_volume: int,
+) -> List[str]:
+    """Bulk snapshot filter via Alpaca — replaces slow yfinance.download loop."""
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockSnapshotRequest
+
+    client = StockHistoricalDataClient(ALPACA_KEY, ALPACA_SECRET)
+    survivors: List[str] = []
+    for i in range(0, len(tickers), 1000):
+        chunk = tickers[i:i + 1000]
+        try:
+            req   = StockSnapshotRequest(symbol_or_symbols=chunk)
+            snaps = client.get_stock_snapshot(req)
+            for sym, snap in snaps.items():
+                if snap.daily_bar:
+                    if snap.daily_bar.close >= min_price and snap.daily_bar.volume >= min_volume:
+                        survivors.append(sym)
+        except Exception as exc:
+            print(f"  Alpaca snapshot chunk error (passing through): {exc}")
+            survivors.extend(chunk)
+    print(f"  Alpaca snapshot filter: {len(tickers)} → {len(survivors)}")
+    return survivors
+
+
+def _alpaca_bars_filter(
+    tickers: List[str],
+    max_drop_pct: float,
+    min_price: float = 10.0,
+    min_volume: int = 2_000_000,
+) -> Dict[str, dict]:
+    """1-year daily bars: compute 52w high + avg_vol_20d, apply price/volume/52w filters."""
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    client = StockHistoricalDataClient(ALPACA_KEY, ALPACA_SECRET)
+    start  = datetime.now() - timedelta(days=380)
+    result: Dict[str, dict] = {}
+
+    for i in range(0, len(tickers), 200):
+        chunk = tickers[i:i + 200]
+        if i % 2000 == 0:
+            print(f"    bars chunk {i//200 + 1}/{(len(tickers) - 1)//200 + 1}...")
+        try:
+            req  = StockBarsRequest(
+                symbol_or_symbols=chunk,
+                timeframe=TimeFrame.Day,
+                start=start,
+            )
+            bars = client.get_stock_bars(req).df   # MultiIndex: symbol / timestamp
+            for ticker in chunk:
+                try:
+                    df = bars.xs(ticker, level="symbol")
+                except KeyError:
+                    continue
+                hi_52w     = float(df["high"].max())
+                avg_vol    = float(df["volume"].tail(20).mean())
+                last_price = float(df["close"].iloc[-1])
+                if (
+                    last_price >= min_price
+                    and avg_vol >= min_volume
+                    and hi_52w > 0
+                    and (last_price / hi_52w) >= (1 - max_drop_pct / 100)
+                ):
+                    result[ticker] = {
+                        "fifty_two_week_high": hi_52w,
+                        "fifty_two_week_low":  float(df["low"].min()),
+                        "avg_volume_20d":      avg_vol,
+                        "price":               last_price,
+                    }
+        except Exception as exc:
+            print(f"  Alpaca bars chunk error: {exc}")
+
+    print(f"  Alpaca bars filter: {len(tickers)} → {len(result)}")
+    return result
 
 
 # ── Batch OHLCV pre-filter ────────────────────────────────────────────────────
@@ -318,11 +429,28 @@ def main() -> None:
     min_price  = float(l1.get("min_price", 10.0))
     min_volume = int(l1.get("min_avg_volume_20d", 2_000_000))
 
+    alpaca_data: Dict[str, dict] = {}
+
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",")]
         print(f"Using {len(tickers)} specified tickers (skipping FTP + pre-filter)")
+
+    elif ALPACA_KEY and ALPACA_SECRET:
+        print("Step 1 — Alpaca: fetching all active US equity symbols...")
+        tickers = _alpaca_get_all_tickers()
+
+        print("\nStep 2 — Alpaca: bars filter (price + volume + 52w distance)...")
+        alpaca_data = _alpaca_bars_filter(
+            tickers,
+            max_drop_pct=float(l1.get("max_distance_from_52w_high_pct", 35)),
+            min_price=min_price,
+            min_volume=min_volume,
+        )
+        tickers = list(alpaca_data.keys())
+        print(f"  After bars filter: {len(tickers)} tickers")
+
     else:
-        print("Step 1 — Fetching full US ticker list from NASDAQ FTP...")
+        print("Step 1 — NASDAQ FTP (Alpaca not configured, using fallback)...")
         tickers = get_all_us_tickers()
 
         if not args.no_prefilter:
@@ -333,6 +461,25 @@ def main() -> None:
     records = fetch_fundamentals_parallel(tickers, max_workers=args.workers)
 
     df = pd.DataFrame(records)
+
+    # Merge Alpaca prefilled price/52w fields into any rows where yfinance.info
+    # returned None — reduces downstream NaN failures on critical L1 columns.
+    if alpaca_data:
+        for col, src_key in [
+            ("price",               "price"),
+            ("avg_volume_20d",      "avg_volume_20d"),
+            ("fifty_two_week_high", "fifty_two_week_high"),
+            ("fifty_two_week_low",  "fifty_two_week_low"),
+        ]:
+            if col not in df.columns:
+                df[col] = None
+            mask = df[col].isna()
+            vals = df.loc[mask, "ticker"].map(
+                lambda t: alpaca_data.get(t, {}).get(src_key)
+            )
+            df[col] = df[col].astype(object)
+            df.loc[mask, col] = vals
+
     df.to_csv(args.output, index=False)
     print(f"\nDone — saved {len(df)} records → {args.output}")
 
