@@ -5,6 +5,8 @@
 #   GEMINI_API_KEY       - used by ai_catalyst.py (Phase 4 onwards)
 #   TELEGRAM_BOT_TOKEN   - required for live push (leave empty for dry-run)
 #   TELEGRAM_CHAT_ID     - required for live push (leave empty for dry-run)
+#   ALPACA_API_KEY       - optional: faster data fetch via Alpaca bulk snapshot
+#   ALPACA_API_SECRET    - optional: paired with ALPACA_API_KEY
 #
 # Schedule (UTC):
 #   0 13 * * 1-5  -> HKT 21:00 same day  (pre-market)
@@ -26,6 +28,8 @@ env:
   GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
   TELEGRAM_BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN }}"
   TELEGRAM_CHAT_ID: "${{ secrets.TELEGRAM_CHAT_ID }}"
+  ALPACA_API_KEY: "${{ secrets.ALPACA_API_KEY }}"
+  ALPACA_API_SECRET: "${{ secrets.ALPACA_API_SECRET }}"
 
 jobs:
   screen:
