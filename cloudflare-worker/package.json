@@ -1,0 +1,7 @@
+{
+  "name": "mcss-telegram-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram webhook -> GitHub repository_dispatch relay for MCSS on-demand runs"
+}
