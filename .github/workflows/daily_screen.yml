@@ -3,14 +3,19 @@
 #
 # Required Secrets (repo Settings > Secrets > Actions):
 #   GEMINI_API_KEY       - used by ai_catalyst.py (Phase 4 onwards)
-#   TELEGRAM_BOT_TOKEN   - required for live push (leave empty for dry-run)
-#   TELEGRAM_CHAT_ID     - required for live push (leave empty for dry-run)
+#   TELEGRAM_BOT_TOKEN   - REQUIRED for live push (scheduled / on-demand runs HARD-FAIL if missing)
+#   TELEGRAM_CHAT_ID     - REQUIRED for live push
 #   ALPACA_API_KEY       - optional: faster data fetch via Alpaca bulk snapshot
 #   ALPACA_API_SECRET    - optional: paired with ALPACA_API_KEY
 #
-# Schedule (UTC):
-#   0 13 * * 1-5  -> HKT 21:00 same day  (pre-market)
-#   0 21 * * 1-5  -> HKT 05:00 next day  (post-market)
+# Triggers:
+#   schedule            - cron (UTC), Mon-Fri:
+#                           0 13 * * 1-5  -> HKT 21:00 same day  (pre-market)
+#                           0 21 * * 1-5  -> HKT 05:00 next day  (post-market)
+#   repository_dispatch - on-demand from the Cloudflare Worker / Telegram bot:
+#                           event type: "mcss_run"
+#                           client_payload: { "session": "pre-market" | "post-market" }
+#   workflow_dispatch   - manual run from the Actions tab (with session + dry_run inputs)
 
 name: MCSS Daily Swing Trade Screen
 
@@ -18,7 +23,21 @@ on:
   schedule:
     - cron: '0 13 * * 1-5'
     - cron: '0 21 * * 1-5'
+  repository_dispatch:
+    types: [mcss_run]
   workflow_dispatch:
+    inputs:
+      session:
+        description: 'Session to run'
+        type: choice
+        options:
+          - post-market
+          - pre-market
+        default: post-market
+      dry_run:
+        description: 'Dry run (print Telegram instead of sending)'
+        type: boolean
+        default: false
 
 concurrency:
   group: mcss-daily-screen
@@ -56,21 +75,70 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Determine session type
+      - name: Resolve session and dry-run mode
+        # Untrusted inputs (client_payload is attacker-settable on repository_dispatch)
+        # are passed via env, never interpolated into the script, then allowlisted.
+        env:
+          EVENT: ${{ github.event_name }}
+          PAYLOAD_SESSION: ${{ github.event.client_payload.session }}
+          INPUT_SESSION: ${{ github.event.inputs.session }}
+          INPUT_DRY: ${{ github.event.inputs.dry_run }}
         run: |
-          HOUR=$(date -u +%H)
-          if [ "$HOUR" = "13" ]; then
-            echo "SESSION=pre-market" >> $GITHUB_ENV
-          else
-            echo "SESSION=post-market" >> $GITHUB_ENV
+          case "$EVENT" in
+            repository_dispatch)
+              RAW_SESSION="$PAYLOAD_SESSION"; DRY="false" ;;
+            workflow_dispatch)
+              RAW_SESSION="$INPUT_SESSION"; DRY="$INPUT_DRY" ;;
+            *)
+              # schedule: derive from UTC hour (13 -> pre-market, else post-market)
+              HOUR=$(date -u +%H)
+              if [ "$HOUR" = "13" ]; then RAW_SESSION="pre-market"; else RAW_SESSION="post-market"; fi
+              DRY="false" ;;
+          esac
+          # Allowlist validation — never trust the raw value
+          case "$RAW_SESSION" in
+            pre-market|post-market) SESSION="$RAW_SESSION" ;;
+            *) SESSION="post-market" ;;
+          esac
+          case "$DRY" in
+            true) DRY="true" ;;
+            *) DRY="false" ;;
+          esac
+          echo "SESSION=$SESSION" >> "$GITHUB_ENV"
+          echo "DRY=$DRY" >> "$GITHUB_ENV"
+          echo "Resolved: event=$EVENT session=$SESSION dry_run=$DRY"
+
+      # Surfaces the previously-silent failure mode: on any LIVE run the
+      # Telegram secrets must be present AND the token must be valid, or the
+      # job fails RED instead of completing green with nothing delivered.
+      - name: Verify Telegram secrets (live runs only)
+        if: ${{ env.DRY != 'true' }}
+        run: |
+          MISSING=0
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret is EMPTY. Add it in repo Settings > Secrets and variables > Actions."
+            MISSING=1
           fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_CHAT_ID secret is EMPTY. Add it in repo Settings > Secrets and variables > Actions."
+            MISSING=1
+          fi
+          if [ "$MISSING" = "1" ]; then
+            echo "::error::Telegram secrets missing -> scheduled push would deliver NOTHING. Failing the run on purpose."
+            exit 1
+          fi
+          # Validate the token actually works (catches wrong/rotated tokens) without printing it.
+          OK=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" | grep -c '"ok":true' || true)
+          if [ "$OK" != "1" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN is set but Telegram getMe rejected it (token wrong or revoked)."
+            exit 1
+          fi
+          echo "Telegram secrets present and token validated."
 
       - name: Run MCSS Pipeline
         run: |
           DRY_RUN_FLAG=""
-          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
+          if [ "$DRY" = "true" ]; then DRY_RUN_FLAG="--dry-run"; fi
           python scripts/run_pipeline.py --session "$SESSION" $DRY_RUN_FLAG
 
       - name: Upload data artifacts

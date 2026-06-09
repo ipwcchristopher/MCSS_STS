@@ -34,6 +34,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     stream=sys.stdout,
 )
+# Security: httpx logs the full request URL (which embeds the bot token) at INFO.
+# Keep these at WARNING so the token never lands in mcss-bot.log in plaintext.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram.request").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
