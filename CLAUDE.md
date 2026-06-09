@@ -19,19 +19,21 @@
 
 ## 2. Agent Team 架構
 
-系統採用 **sequential pipeline**，7 個 agent 順序協作。每個 agent 單一職責，輸出傳俾下一個。
+系統採用 **sequential pipeline**，下表 7 個 stage 順序協作，每個單一職責、輸出傳俾下一個。
+
+> **實作注意**：L1–L4 同 Report 全部係 deterministic Python script（有 unit test）。**只有 L5（AI Catalyst）需要 LLM judgment**。本地 (`claude -p`) 路徑由 `mcss-orchestrator` agent 用 Bash 順序調度，並 spawn `mcss-catalyst-analyst` 做 L5；CI 路徑由 `run_pipeline.py` 跑全 Python（L5 用 `ai_catalyst.py`）。`.claude/agents/` 只保留呢 2 個 agent，唔好為 deterministic 步驟另寫 agent。
 
 | Agent | 檔案 | 職責 | 輸入 → 輸出 |
 |-------|------|------|------------|
 | **Market Gate** | `market_gate.py` | 檢查大市方向，熊市中止 | 市場數據 → PASS/HALT |
-| **Data** | `data_agent.py` | 抓全市場 OHLCV + 基本面 | tickers → DataFrame |
-| **Fundamental** | `fundamental.py` | L2 基本面硬篩 | ~600 → ~120隻 |
-| **Technical** | `technical.py` | L3 技術 + Trend Template + RS | ~120 → ~30隻 |
+| **Data** | `fetch_universe.py` | 抓全市場 OHLCV + 基本面 | tickers → DataFrame |
+| **Fundamental** | `fundamental_filter.py` | L1+L2 硬篩（universe + 基本面）| ~5000 → ~120隻 |
+| **Technical** | `technical_filter.py` | L3 技術 + Trend Template + RS | ~120 → ~30隻 |
 | **Quant Scoring** | `quant_scoring.py` | L4 100分制評分 | ~30 → Top 12 |
 | **AI Catalyst** | `ai_catalyst.py` | L5 新聞情緒 + catalyst | Top 12 → Top 5 |
 | **Report** | `report_agent.py` | 格式化 + push Telegram | Top 5 → TG message |
 
-**Orchestrator** (`orchestrator.py`) 負責調度，任一 agent fail 要 graceful degradation（記 log，唔好 crash 成個 pipeline）。
+**Orchestrator**：CI = `scripts/run_pipeline.py`（GitHub Actions 入口）；本地 = `mcss-orchestrator` agent。任一 stage fail 要 graceful degradation（記 log，唔好 crash 成個 pipeline）。
 
 ---
 
@@ -130,7 +132,9 @@ Short Squeeze Bonus:  +5分   # 只在 short_float>15% AND momentum強
 
 ---
 
-## 4. 心理護欄（guardrails.py — 唔可妥協）
+## 4. 心理護欄（唔可妥協）
+
+> **護欄係 code，唔係靠 LLM 心算。** 實作位置：FOMO RSI 硬 block 在 `technical_filter.py`（L3 篩走 RSI>72）；drawdown / overtrading 等組合層護欄在 `backtest.py` + 部位監控；所有數值在 `config/criteria.yaml` `guardrails` section。
 
 針對用戶壞習慣硬編碼，**任何 agent 都唔可以 bypass**：
 
@@ -179,7 +183,7 @@ position_value = shares * entry
 | 技術指標 | `pandas-ta` | RSI/EMA/ATR/BB |
 | 數據處理 | `pandas`, `numpy` | — |
 | 新聞 | `NewsAPI` (free tier) | L5 用 |
-| AI 分析 | `anthropic` (Claude API) | L5 用，可選；model: `claude-sonnet-4-6` |
+| AI 分析 | CI: `google-generativeai` (Gemini `gemini-1.5-flash`) / 本地: Claude.ai subscription | L5 用，可選。`ai_catalyst.py` 支援雙引擎：有 `ANTHROPIC_API_KEY` 用 Claude `claude-sonnet-4-6`，否則用 `GEMINI_API_KEY`。GitHub Actions 只設 `GEMINI_API_KEY`；本地 `mcss-catalyst-analyst` agent 行 subscription（免 API 費） |
 | Insider | SEC EDGAR (免費 API) | Form 4 |
 | 推送 | `python-telegram-bot` | $0 |
 | 排程 | GitHub Actions | $0 |

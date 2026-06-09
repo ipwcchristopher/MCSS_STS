@@ -81,8 +81,8 @@ if [ -n "$DRY_RUN" ]; then
   DRY_RUN_INSTRUCTION="Use dry-run mode — print Telegram report to console, do not send."
 fi
 
-claude -p "Run MCSS daily swing trade screen. Session: $SESSION. Today is $(date +%Y-%m-%d). Run the complete pipeline: mcss-market-gate → mcss-data-screener → [mcss-fundamental-analyst + mcss-technical-analyst in parallel] → mcss-quant-scorer → mcss-catalyst-analyst → mcss-reporter. All data files go to data/ directory. $DRY_RUN_INSTRUCTION" \
-  --allowedTools "Bash,WebSearch,WebFetch,Agent" \
+claude -p "Use the mcss-orchestrator agent to run the MCSS daily swing trade screen. Session: $SESSION. Today is $(date +%Y-%m-%d). The orchestrator runs the deterministic pipeline sequentially via Bash (scripts/market_gate.py -> fetch_universe.py -> fundamental_filter.py -> technical_filter.py -> quant_scoring.py), then spawns the mcss-catalyst-analyst sub-agent for L5, then runs scripts/report_agent.py to push the Telegram report. All data files go to data/ directory. $DRY_RUN_INSTRUCTION" \
+  --allowedTools "Bash,WebSearch,WebFetch,Agent,Read" \
   --max-turns 50
 
 echo "==================================="
