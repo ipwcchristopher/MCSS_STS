@@ -20,6 +20,7 @@ Usage:
 """
 import argparse
 import concurrent.futures
+import json
 import os
 import threading
 import time
@@ -564,6 +565,12 @@ def main() -> None:
             )
             df[col] = df[col].astype(object)
             df.loc[mask, col] = vals
+
+    _non_null = int(df["market_cap"].notna().sum()) if "market_cap" in df.columns else 0
+    _pct = round(_non_null / len(df) * 100) if len(df) else 0
+    _quality_path = Path(args.output).parent / "universe_quality.json"
+    with open(_quality_path, "w") as _qf:
+        json.dump({"data_quality_pct": _pct, "yfinance_degraded": _pct < 70}, _qf)
 
     df.to_csv(args.output, index=False)
     print(f"\nDone — saved {len(df)} records → {args.output}")
