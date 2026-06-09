@@ -247,6 +247,13 @@ def _apply_l3_filter(
     if vol_ratio < min_vol:
         return False, f"volume_ratio:{vol_ratio:.2f}<{min_vol}", metrics
 
+    # VCP hard filter — enforced when vcp_optional is False
+    vcp_required = not bool(l3.get("vcp_optional", True))
+    if vcp_required and not vcp_detected:
+        min_vcp = int(l3.get("min_vcp_score", 60))
+        if vcp_score < min_vcp:
+            return False, f"vcp_required:score={vcp_score}<{min_vcp}", metrics
+
     return True, "", metrics
 
 
