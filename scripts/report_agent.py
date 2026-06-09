@@ -199,19 +199,16 @@ def main() -> None:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
-    # Load pipeline metadata
-    pipeline_meta_path = ROOT / "data" / "pipeline_run.json"
     universe_size, l3_passed = 0, 0
-    if pipeline_meta_path.exists():
-        with open(pipeline_meta_path) as f:
-            meta = json.load(f)
-        # Try to get counts from summary files
     tech_summary = ROOT / "data" / "technical_filter_summary.json"
     if tech_summary.exists():
-        with open(tech_summary) as f:
-            ts = json.load(f)
-        universe_size = ts.get("l2_input", 0)
-        l3_passed = ts.get("l3_passed", 0)
+        try:
+            with open(tech_summary) as f:
+                ts = json.load(f)
+            universe_size = ts.get("l2_input", 0)
+            l3_passed = ts.get("l3_passed", 0)
+        except Exception:
+            pass
 
     print(f"Reading {input_path}...")
     if not input_path.exists():
