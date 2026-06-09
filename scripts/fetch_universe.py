@@ -33,6 +33,12 @@ import requests
 import yaml
 import yfinance as yf
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent / ".env")
+except ImportError:
+    pass
+
 ALPACA_KEY    = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.environ.get("ALPACA_API_SECRET", "")
 
@@ -138,6 +144,74 @@ def _get_sp500_fallback() -> List[str]:
     tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
     print(f"  S&P 500 fallback: {len(tickers)} tickers")
     return tickers
+
+
+def _get_sp500_nasdaq100() -> List[str]:
+    """
+    Default local universe: S&P 500 + NASDAQ 100 from Wikipedia.
+    ~560 unique liquid US stocks — fast to fetch, covers all major swing candidates.
+    Replaces slow NASDAQ FTP + 8000-ticker OHLCV prefilter for local daily runs.
+    """
+    headers = {"User-Agent": "Mozilla/5.0"}
+    tickers: set = set()
+
+    # S&P 500
+    try:
+        resp = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            timeout=30, headers=headers,
+        )
+        tables = pd.read_html(StringIO(resp.text))
+        sp500 = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
+        tickers.update(sp500)
+        print(f"  S&P 500 (Wikipedia): {len(sp500)} tickers")
+    except Exception as exc:
+        print(f"  S&P 500 scrape failed: {exc}")
+
+    # NASDAQ 100
+    try:
+        resp = requests.get(
+            "https://en.wikipedia.org/wiki/Nasdaq-100",
+            timeout=30, headers=headers,
+        )
+        tables = pd.read_html(StringIO(resp.text))
+        # Find table with a "Ticker" or "Symbol" column
+        ndx = []
+        for t in tables:
+            for col in t.columns:
+                if str(col).strip().lower() in ("ticker", "symbol"):
+                    ndx = t[col].dropna().str.replace(".", "-", regex=False).tolist()
+                    break
+            if ndx:
+                break
+        tickers.update(ndx)
+        print(f"  NASDAQ 100 (Wikipedia): {len(ndx)} tickers")
+    except Exception as exc:
+        print(f"  NASDAQ 100 scrape failed: {exc}")
+
+    # S&P 400 MidCap — captures growth mid-caps common in swing trading
+    try:
+        resp = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+            timeout=30, headers=headers,
+        )
+        tables = pd.read_html(StringIO(resp.text))
+        sp400 = []
+        for t in tables:
+            for col in t.columns:
+                if str(col).strip().lower() in ("ticker", "symbol"):
+                    sp400 = t[col].dropna().str.replace(".", "-", regex=False).tolist()
+                    break
+            if sp400:
+                break
+        tickers.update(sp400)
+        print(f"  S&P 400 MidCap (Wikipedia): {len(sp400)} tickers")
+    except Exception as exc:
+        print(f"  S&P 400 scrape failed (non-fatal): {exc}")
+
+    result = sorted(t for t in tickers if _is_common_equity(t))
+    print(f"  Total local universe: {len(result)} unique tickers")
+    return result
 
 
 def get_all_us_tickers() -> List[str]:
@@ -417,10 +491,14 @@ def load_config(config_path: str = "config/criteria.yaml") -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch MCSS universe raw data")
     parser.add_argument("--output", default="data/universe_raw.csv")
-    parser.add_argument("--tickers", default=None, help="Comma-separated override (skips FTP + pre-filter)")
+    parser.add_argument("--tickers", default=None, help="Comma-separated override (skips all universe discovery)")
     parser.add_argument("--config", default="config/criteria.yaml")
-    parser.add_argument("--no-prefilter", action="store_true", help="Skip batch OHLCV pre-filter")
-    parser.add_argument("--workers", type=int, default=5, help="ThreadPoolExecutor workers for .info (keep low to avoid 401 rate limits)")
+    parser.add_argument("--no-prefilter", action="store_true", help="Skip batch OHLCV pre-filter (full-universe path only)")
+    parser.add_argument("--full-universe", action="store_true",
+                        help="Use full NASDAQ FTP universe (~8000 tickers) instead of S&P500+NDX default. "
+                             "Designed for GitHub Actions with Alpaca. Very slow locally.")
+    parser.add_argument("--workers", type=int, default=3,
+                        help="Parallel workers for yfinance .info (default 3 — Yahoo rate-limit safe)")
     args = parser.parse_args()
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
@@ -433,7 +511,7 @@ def main() -> None:
 
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",")]
-        print(f"Using {len(tickers)} specified tickers (skipping FTP + pre-filter)")
+        print(f"Using {len(tickers)} specified tickers (skipping universe discovery)")
 
     elif ALPACA_KEY and ALPACA_SECRET:
         print("Step 1 — Alpaca: fetching all active US equity symbols...")
@@ -449,15 +527,22 @@ def main() -> None:
         tickers = list(alpaca_data.keys())
         print(f"  After bars filter: {len(tickers)} tickers")
 
-    else:
-        print("Step 1 — NASDAQ FTP (Alpaca not configured, using fallback)...")
+    elif args.full_universe:
+        print("Step 1 — NASDAQ FTP full universe (--full-universe flag)...")
         tickers = get_all_us_tickers()
 
         if not args.no_prefilter:
             print("\nStep 2 — OHLCV batch pre-filter (price + volume)...")
             tickers = _batch_ohlcv_prefilter(tickers, min_price=min_price, min_avg_volume=min_volume)
 
-    print(f"\nStep 3 — Fetching fundamentals for {len(tickers)} tickers...")
+    else:
+        # Default for local daily runs: S&P 500 + NASDAQ 100 + S&P 400 (~1100 stocks)
+        # Much faster than full NASDAQ FTP + OHLCV pre-filter, avoids Yahoo 401 rate limits.
+        # Use --full-universe for the broader 8000-ticker screen (or set Alpaca keys).
+        print("Step 1 — S&P 500 + NASDAQ 100 + S&P 400 (default local universe)...")
+        tickers = _get_sp500_nasdaq100()
+
+    print(f"\nFetching fundamentals for {len(tickers)} tickers ({args.workers} workers)...")
     records = fetch_fundamentals_parallel(tickers, max_workers=args.workers)
 
     df = pd.DataFrame(records)

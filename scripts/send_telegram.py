@@ -5,8 +5,15 @@ Secrets from env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import argparse
 import os
+from pathlib import Path
 
 import requests
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent / ".env")
+except ImportError:
+    pass
 
 
 def send_message(message: str, dry_run: bool = False) -> bool:

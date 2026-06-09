@@ -40,7 +40,7 @@ l3_technical:
   min_rs_rating: 80
   min_rsi14: 45
   max_rsi14: 72
-  min_volume_ratio_vs_avg20d: 1.5
+  min_volume_ratio_vs_avg20d: 1.2
   min_vcp_score: 60
   vcp_optional: false
   require_sector_alignment: true

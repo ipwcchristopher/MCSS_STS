@@ -227,8 +227,11 @@ def main() -> None:
     top_n = int(l4_cfg.get("top_n", 12))
 
     print(f"Reading {input_path}...")
-    l3 = pd.read_csv(input_path)
-    tickers = l3["ticker"].tolist()
+    try:
+        l3 = pd.read_csv(input_path)
+    except (pd.errors.EmptyDataError, Exception):
+        l3 = pd.DataFrame()
+    tickers = l3["ticker"].tolist() if not l3.empty else []
     print(f"L3 input tickers: {len(tickers)}")
 
     if not tickers:

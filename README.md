@@ -59,6 +59,20 @@
 
 ---
 
+## 📡 數據宇宙來源
+
+系統按優先順序自動選擇股票宇宙：
+
+| 優先 | 來源 | 數量 | 需要 |
+|------|------|------|------|
+| 1 | Alpaca Trading API（活躍美股 + bars 過濾）| ~729 | `ALPACA_API_KEY` + `ALPACA_API_SECRET` |
+| 2 | S&P 500 + NASDAQ 100 + S&P 400 MidCap（Wikipedia）| ~805 | 唔需要（默認） |
+| 3 | NASDAQ FTP 全宇宙（`--full-universe` flag）| ~8,000+ | 設計用於 GitHub Actions |
+
+**本地開發默認用第 2 種**（唔需要 API key 都可以跑完整 pipeline）。
+
+---
+
 ## 💰 成本分析
 
 | 組件 | 成本 |
@@ -102,49 +116,58 @@
 ### 2. （可選）申請 Claude API Key
 - 去 https://console.anthropic.com 申請（AI-enhanced 版先需要）
 
+### 2b. 本地開發：建立 `.env` 文件
+喺項目根目錄建立 `.env`（已加入 `.gitignore`，唔會 commit）：
+
+```
+TELEGRAM_BOT_TOKEN=你嘅bot_token
+TELEGRAM_CHAT_ID=你嘅chat_id
+ALPACA_API_KEY=你嘅alpaca_key（可選）
+ALPACA_API_SECRET=你嘅alpaca_secret（可選）
+```
+
+本地跑 `python scripts/run_pipeline.py` 時系統會自動讀取。
+
 ### 3. 設定 GitHub Secrets
 喺你個 GitHub repo → Settings → Secrets and variables → Actions，加入：
 
 ```
 TELEGRAM_BOT_TOKEN   = 你嘅 bot token
 TELEGRAM_CHAT_ID     = 你嘅 chat id
-ANTHROPIC_API_KEY    = 你嘅 Claude key（可選）
+ALPACA_API_KEY       = 你嘅 Alpaca key（可選，宇宙更精準）
+ALPACA_API_SECRET    = 你嘅 Alpaca secret（可選）
+ANTHROPIC_API_KEY    = 你嘅 Claude key（可選，L5 AI 分析）
 ```
 
-> 🔒 密鑰只放 GitHub Secrets，**永遠唔好** commit 入代碼。
+> 🔒 密鑰只放 GitHub Secrets / `.env`，**永遠唔好** commit 入代碼。
 
 ---
 
-## 📦 項目結構（建設完成後）
+## 📦 項目結構
 
 ```
-mcss_project/
-├── README.md                 ← 本文件
-├── CLAUDE.md                 ← AI agent team 指引
-├── requirements.txt          ← Python 依賴
+MCSS_STS/
+├── README.md
+├── CLAUDE.md                  ← AI agent team 指引 + 完整 spec
+├── requirements.txt           ← Python 依賴
+├── run_mcss.sh                ← 本地快速運行腳本
 ├── config/
-│   ├── criteria.yaml         ← Screening 參數（可調整）
-│   └── watchlist.txt         ← 你嘅自選股
-├── src/
-│   ├── orchestrator.py       ← 主協調器
-│   ├── agents/
-│   │   ├── market_gate.py     ← Gate 0: 市場方向
-│   │   ├── data_agent.py      ← L1: 數據抓取
-│   │   ├── fundamental.py     ← L2: 基本面篩選
-│   │   ├── technical.py       ← L3: 技術 + Trend Template
-│   │   ├── quant_scoring.py   ← L4: 量化評分
-│   │   ├── ai_catalyst.py     ← L5: AI 新聞情緒
-│   │   └── report_agent.py    ← Telegram 報告
-│   ├── indicators/
-│   │   ├── rs_rating.py       ← Relative Strength 計算
-│   │   ├── vcp.py             ← VCP pattern 檢測
-│   │   └── trend_template.py  ← Minervini Trend Template
-│   └── utils/
-│       ├── telegram.py        ← TG 推送
-│       └── guardrails.py      ← 心理護欄規則
+│   └── criteria.yaml          ← Screening 參數（可調整）
+├── scripts/
+│   ├── run_pipeline.py        ← 主協調器（順序執行7個階段）
+│   ├── market_gate.py         ← Gate 0: SPY/QQQ/VIX 市場方向
+│   ├── fetch_universe.py      ← L1: 宇宙抓取（Alpaca / S&P500+NDX+S&P400）
+│   ├── fundamental_filter.py  ← L2: 基本面篩選
+│   ├── technical_filter.py    ← L3: Minervini Trend Template + VCP
+│   ├── quant_scoring.py       ← L4: 量化評分
+│   ├── ai_catalyst.py         ← L5: AI 新聞情緒
+│   ├── report_agent.py        ← 生成報告
+│   ├── send_telegram.py       ← Telegram 推送
+│   └── indicators/            ← rs_rating, vcp, trend_template
 ├── .github/workflows/
-│   └── daily_screen.yml      ← GitHub Actions 排程
-└── tests/                    ← 測試
+│   └── daily_screen.yml       ← GitHub Actions 排程
+├── tests/                     ← pytest 測試套件（38 tests）
+└── data/                      ← 每次運行輸出（CSV/JSON，唔 commit）
 ```
 
 ---
@@ -200,6 +223,8 @@ mcss_project/
 - [x] **Phase 3**: L4 Quant Scoring + L5 AI Catalyst (Week 5–6)
 - [x] **Phase 4**: Telegram Bot + GitHub Actions 部署 (Week 7)
 - [x] **Phase 5**: Backtesting + 優化 (Week 8–10)
+- [x] **Bug fixes**: yfinance 401 rate limit 修正、空 CSV crash 修正、Alpaca env 加載修正
+- [x] **Test suite**: 38 pytest tests 覆蓋 L1–L4、VCP、RS Rating
 - [ ] **Phase 6**: IBKR Auto Trading (未來，可選)
 
 詳細規格見 [`CLAUDE.md`](./CLAUDE.md)。
