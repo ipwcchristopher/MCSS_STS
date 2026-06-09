@@ -20,6 +20,7 @@ Required env vars:
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -27,6 +28,13 @@ from pathlib import Path
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "data"
@@ -136,14 +144,18 @@ def main() -> None:
     if not os.environ.get("TELEGRAM_CHAT_ID"):
         raise EnvironmentError("TELEGRAM_CHAT_ID must be set")
 
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.error("Unhandled exception", exc_info=context.error)
+
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("start", cmd_help))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("run", cmd_run))
+    app.add_error_handler(error_handler)
 
-    print("MCSS Telegram Bot started. Send /run in Telegram to trigger pipeline.", flush=True)
-    print("Press Ctrl+C to stop.", flush=True)
+    logger.info("MCSS Telegram Bot started. Send /run in Telegram to trigger pipeline.")
+    logger.info("Press Ctrl+C to stop.")
     app.run_polling(drop_pending_updates=True)
 
 
