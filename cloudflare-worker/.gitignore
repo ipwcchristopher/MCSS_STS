@@ -1,5 +1,6 @@
 # Local dev secrets — never commit
 .dev.vars
+.webhook_secret
 # Wrangler / node
 .wrangler/
 node_modules/
