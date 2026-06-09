@@ -21,26 +21,27 @@
 ## 🏛️ 系統架構
 
 ```
-                    ┌─────────────────────────┐
-                    │   GitHub Actions (Cron)  │  ← 免費，每日定時觸發
-                    │   唔需要你開機             │
-                    └───────────┬─────────────┘
-                                │
-              ┌─────────────────┴─────────────────┐
-              │         Agent Orchestrator         │
-              └─────────────────┬─────────────────┘
-                                │
-   ┌──────────┬──────────┬──────┴─────┬──────────┬──────────┐
-   ▼          ▼          ▼            ▼          ▼          ▼
-┌──────┐  ┌──────┐  ┌────────┐  ┌────────┐  ┌──────┐  ┌────────┐
-│Market│  │ Data │  │Technical│  │ Quant  │  │  AI  │  │ Report │
-│ Gate │→ │Agent │→ │ Agent   │→ │Scoring │→ │Agent │→ │ Agent  │
-│Agent │  │      │  │         │  │ Agent  │  │      │  │  (TG)  │
-└──────┘  └──────┘  └────────┘  └────────┘  └──────┘  └────────┘
-  市場檢查   抓數據    技術篩選     量化評分    新聞情緒   推送TG
+   ┌──────────────────────┐          ┌───────────────────────────┐
+   │ GitHub Actions (Cron) │          │  本地 ./run_mcss.sh        │
+   │ CI: run_pipeline.py   │          │  agent: mcss-orchestrator  │
+   │ (全 Python，唔使開機) │          │  (Bash 順序調度)           │
+   └───────────┬──────────┘          └─────────────┬─────────────┘
+               └───────────────┬───────────────────┘
+                               ▼  順序 pipeline (每級縮小宇宙)
+ ┌──────┐ ┌──────┐ ┌──────────┐ ┌─────────┐ ┌───────┐ ┌──────────┐ ┌──────┐
+ │Gate 0│→│  L1  │→│    L2    │→│   L3    │→│  L4   │→│    L5    │→│Report│
+ │Market│ │Fetch │ │Fundamen- │ │Technical│ │ Quant │ │ Catalyst │ │ +TG  │
+ │ Gate │ │Univ. │ │tal Filter│ │ Filter  │ │Scoring│ │ (AI/新聞)│ │      │
+ └──────┘ └──────┘ └──────────┘ └─────────┘ └───────┘ └──────────┘ └──────┘
+ 市場檢查  抓數據    L1+L2基本面   技術篩選    量化評分   新聞情緒    推送TG
+ └────────── deterministic Python（有 unit test）──────────┘ └─ LLM ─┘
 ```
 
-每個 Agent 有專屬職責，順序協作。詳見 [`CLAUDE.md`](./CLAUDE.md)。
+> **L1–L4 + Report 全部係 deterministic Python script**（`scripts/*.py`，有 unit test，唔靠 LLM）。**只有 L5 catalyst 需要 LLM judgment**（live 新聞研究）。
+> - **CI 路徑**：`run_pipeline.py` 跑全 Python，L5 用 `ai_catalyst.py`（Gemini API）。
+> - **本地路徑**：`mcss-orchestrator` agent 用 Bash 順序調度上面各 script，L5 spawn `mcss-catalyst-analyst`（行 Claude.ai subscription，免 API 費）。
+>
+> `.claude/agents/` 只保留 `mcss-orchestrator` 同 `mcss-catalyst-analyst` 兩個 agent。詳見 [`CLAUDE.md`](./CLAUDE.md)。
 
 ---
 
@@ -82,10 +83,11 @@
 | Telegram Bot（推送）| **$0** |
 | pandas-ta / numpy（技術指標）| **$0** |
 | **Lite 版小計** | **$0/月** ✅ |
-| Claude API（新聞情緒分析，可選）| ~$5–15/月 |
-| **AI-enhanced 版小計** | **~$5–15/月** |
+| L5 AI 情緒分析（可選）— Gemini `gemini-1.5-flash` | **~$0**（free tier 額度內，CI 預設）|
+| L5 AI 情緒分析（可選）— Claude `claude-sonnet-4-6`（質素更高）| ~$5–15/月 |
+| **AI-enhanced 版小計** | **$0–15/月** |
 
-> 你預算係 $0 — 可以先跑 **Lite 版**（跳過 L5 AI 情緒層，用 rule-based catalyst），完全免費。之後想要 AI 新聞分析先加 Claude API。
+> 你預算係 $0 — 可以先跑 **Lite 版**（無 AI key，L5 直接 pass-through L4 排名），完全免費。想要 AI 新聞分析：**CI 用 Gemini（基本免費）**；本地用 `mcss-catalyst-analyst` agent 行你嘅 Claude.ai subscription（免 API 費）；想 CI 都用 Claude 質素先加 `ANTHROPIC_API_KEY`。
 
 ---
 
@@ -113,8 +115,10 @@
 4. 搜尋你個 bot，send 一句嘢
 5. 開 `https://api.telegram.org/bot<TOKEN>/getUpdates` 攞你嘅 **Chat ID**
 
-### 2. （可選）申請 Claude API Key
-- 去 https://console.anthropic.com 申請（AI-enhanced 版先需要）
+### 2. （可選）申請 L5 AI 分析 Key
+- **Gemini（推薦俾 CI 用，基本免費）**：去 https://aistudio.google.com/apikey 攞 `GEMINI_API_KEY`
+- **Claude（可選，質素更高，付費）**：去 https://console.anthropic.com 攞 `ANTHROPIC_API_KEY`
+- 兩者皆可選；都唔設就跑 Lite 版（L5 pass-through L4 排名）。本地用 `mcss-catalyst-analyst` agent 行 Claude.ai subscription 則唔使任何 key
 
 ### 2b. 本地開發：建立 `.env` 文件
 喺項目根目錄建立 `.env`（已加入 `.gitignore`，唔會 commit）：
@@ -124,9 +128,11 @@ TELEGRAM_BOT_TOKEN=你嘅bot_token
 TELEGRAM_CHAT_ID=你嘅chat_id
 ALPACA_API_KEY=你嘅alpaca_key（可選）
 ALPACA_API_SECRET=你嘅alpaca_secret（可選）
+GEMINI_API_KEY=你嘅gemini_key（可選，本地跑 run_pipeline.py 嘅 L5 用）
+ANTHROPIC_API_KEY=你嘅claude_key（可選，若設則 L5 優先用 Claude）
 ```
 
-本地跑 `python scripts/run_pipeline.py` 時系統會自動讀取。
+本地跑 `python scripts/run_pipeline.py` 時系統會自動讀取。用 `./run_mcss.sh`（agent 路徑）跑 L5 則行 Claude.ai subscription，唔使 AI key。
 
 ### 3. 設定 GitHub Secrets
 喺你個 GitHub repo → Settings → Secrets and variables → Actions，加入：
@@ -136,8 +142,10 @@ TELEGRAM_BOT_TOKEN   = 你嘅 bot token
 TELEGRAM_CHAT_ID     = 你嘅 chat id
 ALPACA_API_KEY       = 你嘅 Alpaca key（可選，宇宙更精準）
 ALPACA_API_SECRET    = 你嘅 Alpaca secret（可選）
-ANTHROPIC_API_KEY    = 你嘅 Claude key（可選，L5 AI 分析）
+GEMINI_API_KEY       = 你嘅 Gemini key（可選，L5 AI 分析；workflow 預設用呢個）
 ```
+
+> ℹ️ CI 嘅 L5 預設行 **Gemini**（`daily_screen.yml` 只注入 `GEMINI_API_KEY`）。若想 CI 改用 Claude，要另設 `ANTHROPIC_API_KEY` secret **並**喺 `daily_screen.yml` 個 `env:` 加返佢（`ai_catalyst.py` 有 key 就優先用 Claude）。
 
 > 🔒 密鑰只放 GitHub Secrets / `.env`，**永遠唔好** commit 入代碼。
 
@@ -187,24 +195,44 @@ MCSS_STS/
 ## 📊 Telegram 報告範例
 
 ```
-🎯 MCSS DAILY TOP 5 — 2026-05-24 (收市後)
-━━━━━━━━━━━━━━━━━━━━━━━
-📊 市場狀態: ✅ CONFIRMED UPTREND
-   SPY > 200EMA ✓ | QQQ > 200EMA ✓ | VIX 16.2
+📊 MCSS 每日篩選 — 2026-05-24 (收市後)
+篩選漏斗: 805隻 → L3通過: 28隻 → Top 5
 
-━━━ #1 NVDA | Score: 92/105 ━━━
-🟢 RS Rating: 94 (跑贏94%市場)
-📈 入場區: $128.50 – $130.20
-🛑 止損位: $124.80 (-3.5%, ATR 1.5x)
-🎯 目標1: $136.00 (+5%) → 出50%
-🎯 目標2: Trailing stop
-⚡ Catalyst: Analyst upgrade (GS, TP$175)
-📰 新聞情緒: POSITIVE ↑
-🔥 VCP: 3 contractions, 成交量乾涸
-⚠️ Earnings in 8 days
-━━━━━━━━━━━━━━━━━━━━━━━
-[#2-#5 略...]
+今日入選股票
+━━━━━━━━━━━━━━━━━━━━━━
+#1 NVDA — NVIDIA Corporation
+綜合評分: 92/105  |  市值: $3.1B
+
+板塊: Technology · Semiconductors
+
+📈 技術信號
+  • RS評級: 94/99 — 跑贏全市 94% 股票
+  • RSI(14): 63.2 — 強勢但未過熱
+  • 成交量: 1.8x 平均 (資金流入)
+  • 距52週高: -4.1% — 接近高位整固
+  • 趨勢模板: ✅ EMA20>50>150>200 多頭排列 | VCP收縮形態
+
+💰 基本面快照
+  • 收入增長: +94.0% YoY
+  • 毛利率: +75.0%  |  ROE: +91.5%
+  • 自由現金流: $28.1B  |  預測PE: 32.4x
+  • 機構持股: +66.0%
+
+🏆 評分細分
+  RS動能:20 + 質素:24 + 動量:23 + VCP:13 + 波幅:8 + 估值:4
+
+📍 交易設置
+  入場: $128.50
+  止損: $124.80 (-2.9%)  [ATR×1.5 = $2.47]
+  目標: $135.90 (+5.8%)  [2:1 風險回報]
+  Catalyst: Morgan Stanley upgrade to Overweight (+2). Q1 EPS beat 14% (+2).
+━━━━━━━━━━━━━━━━━━━━━━
+純系統輸出，非投資建議。所有決定請自行判斷。
+
+[#2–#5 同格式，略]
 ```
+
+> 範例對應 `report_agent.py` 實際輸出格式（Telegram 以 HTML 粗體渲染）。有 earnings 嘅股票會多一行 `⚠️ EARNINGS RISK — 倉位減半，止損收緊`；0 隻入選時改發精簡「今日 0 隻」通知。
 
 ---
 
