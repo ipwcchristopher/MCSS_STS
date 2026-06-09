@@ -108,7 +108,9 @@ def main() -> None:
     run_record["stages"]["fundamental_filter"] = "pass" if ok else "warn"
 
     # --- Stage 3: Technical Filter (L3) — Phase 2 ---
-    ok = run_script("technical_filter.py")
+    ok = run_script("technical_filter.py",
+                    ["--input", str(DATA_DIR / "l2_fundamental_passed.csv"),
+                     "--output-dir", str(DATA_DIR)])
     run_record["stages"]["technical_filter"] = "pass" if ok else "warn"
 
     # --- Stage 4: Quant Scoring (L4) — Phase 3 ---

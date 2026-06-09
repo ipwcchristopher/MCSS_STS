@@ -254,7 +254,7 @@ def _apply_l3_filter(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default="data/l1_passed.csv")
+    parser.add_argument("--input", default="data/l2_fundamental_passed.csv")
     parser.add_argument("--output-dir", default="data")
     args = parser.parse_args()
 
