@@ -12,9 +12,11 @@ import argparse
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import yaml
+import yfinance as yf
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,68 @@ def _check_earnings_play(earnings_date_str: str, window_days: int = 5) -> bool:
         return 0 <= delta <= window_days
     except Exception:
         return False
+
+
+def _check_revenue_acceleration(ticker: str) -> Optional[bool]:
+    """Return True if current quarter YoY revenue growth >= prior quarter's.
+
+    Fetches quarterly_income_stmt for 6 quarters (min required).
+    Returns None when insufficient data — caller treats as unknown (soft pass).
+    """
+    try:
+        stmt = yf.Ticker(ticker).quarterly_income_stmt
+        if stmt is None or stmt.empty:
+            return None
+        rev_key = next(
+            (k for k in stmt.index if "revenue" in str(k).lower() and "total" in str(k).lower()),
+            None,
+        )
+        if rev_key is None:
+            rev_key = next((k for k in stmt.index if "revenue" in str(k).lower()), None)
+        if rev_key is None:
+            return None
+        rev = stmt.loc[rev_key].sort_index(ascending=False).dropna()
+        if len(rev) < 6:
+            return None
+        q = [float(rev.iloc[i]) for i in range(6)]
+        if q[4] <= 0 or q[5] <= 0:
+            return None
+        yoy_now = q[0] / q[4] - 1.0
+        yoy_prev = q[1] / q[5] - 1.0
+        return yoy_now >= yoy_prev
+    except Exception:
+        return None
+
+
+def _check_eps_acceleration(ticker: str) -> Optional[bool]:
+    """Return True if EPS growth accelerated over the last 2 consecutive quarters.
+
+    Uses diluted EPS from quarterly_income_stmt; requires 5 quarters.
+    Returns None when insufficient data — caller treats as unknown (soft pass).
+    """
+    try:
+        stmt = yf.Ticker(ticker).quarterly_income_stmt
+        if stmt is None or stmt.empty:
+            return None
+        eps_key = next(
+            (k for k in stmt.index if "diluted" in str(k).lower() and "eps" in str(k).lower()),
+            None,
+        )
+        if eps_key is None:
+            eps_key = next((k for k in stmt.index if "eps" in str(k).lower()), None)
+        if eps_key is None:
+            return None
+        eps = stmt.loc[eps_key].sort_index(ascending=False).dropna()
+        if len(eps) < 5:
+            return None
+        e = [float(eps.iloc[i]) for i in range(5)]
+        if e[3] == 0 or e[4] == 0:
+            return None
+        g_recent = (e[0] - e[4]) / abs(e[4])
+        g_prior = (e[1] - e[3]) / abs(e[3])
+        return g_recent > g_prior
+    except Exception:
+        return None
 
 
 def apply_l1_filter(
@@ -158,8 +222,9 @@ def apply_l2_filter(
     Apply L2 fundamental filter on L1-passed stocks.
 
     Returns (passed_df, excluded_df). excluded_df has 'filter_reason'.
-    Note: revenue/EPS acceleration checks are soft (flag when unverifiable
-    because yfinance info endpoint lacks quarterly history).
+    Note: revenue/EPS acceleration uses yfinance quarterly_income_stmt.
+    Returns None when data is unavailable (soft pass); False means confirmed
+    deceleration and triggers a hard exclude.
     """
     l2 = cfg["l2_fundamental"]
 
@@ -202,14 +267,30 @@ def apply_l2_filter(
         if pe is not None and not pd.isna(pe) and float(pe) > max_pe:
             reasons.append(f"trailing_pe:{float(pe):.0f}>{max_pe}")
 
-        # --- Acceleration checks (informational only — yfinance info lacks quarterly history) ---
-        # Revenue acceleration and EPS acceleration require quarterly financials
-        # (Ticker.quarterly_financials). These are NOT hard-filtered here;
-        # the mcss-fundamental-analyst agent runs deeper checks via yfinance
-        # Ticker objects for the smaller L2 candidate list.
+        # --- Acceleration checks (quarterly financials via yfinance) ---
+        # None = insufficient data → soft pass (don't hard-exclude)
+        # False = confirmed deceleration → hard-exclude
+        l2_cfg = cfg.get("l2_fundamental", {})
+        if l2_cfg.get("require_revenue_growth_acceleration", True):
+            rev_accel = _check_revenue_acceleration(str(row.get("ticker", "")))
+            if rev_accel is False:
+                reasons.append("rev_growth:decelerating")
+        else:
+            rev_accel = None
+
+        eps_needed = int(l2_cfg.get("require_eps_acceleration_consecutive_quarters", 2))
+        if eps_needed > 0:
+            eps_accel = _check_eps_acceleration(str(row.get("ticker", "")))
+            if eps_accel is False:
+                reasons.append("eps_growth:decelerating")
+        else:
+            eps_accel = None
+
         out = row.to_dict()
         out["l2_pass"] = len(reasons) == 0
-        out["l2_notes"] = "rev/eps acceleration unverifiable from info endpoint"
+        out["rev_accel"] = rev_accel
+        out["eps_accel"] = eps_accel
+        out["l2_notes"] = ""
 
         if reasons:
             out["filter_reason"] = "; ".join(reasons)
