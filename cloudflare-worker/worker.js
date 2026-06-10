@@ -61,13 +61,13 @@ export default {
       if (cmd === "/run") {
         let session = (parts[1] || "post-market").toLowerCase();
         if (session !== "pre-market" && session !== "post-market") session = "post-market";
-        const ok = await dispatch(env, session);
+        const r = await dispatch(env, session);
         await sendMessage(
           env,
           chatId,
-          ok
+          r.ok
             ? `🚀 已觸發雲端 pipeline (session: <b>${session}</b>)\nGitHub Actions 開始跑緊,完成會自動 push 報告。\n用 /status 睇進度。`
-            : "❌ 觸發失敗 — 檢查 Worker 嘅 GITHUB_TOKEN 權限 (需要 Contents: write)。"
+            : `❌ 觸發失敗 (HTTP ${r.status})\n${r.detail || "(no detail)"}\n\n通常係 GITHUB_TOKEN 權限:fine-grained token 要 Repository = ${env.GITHUB_OWNER}/${env.GITHUB_REPO}、Contents = Read and write、Actions = Read。`
         );
       } else if (cmd === "/status") {
         await sendMessage(env, chatId, await latestRun(env));
@@ -100,7 +100,15 @@ async function dispatch(env, session) {
     headers: ghHeaders(env, true),
     body: JSON.stringify({ event_type: "mcss_run", client_payload: { session } }),
   });
-  return resp.status === 204; // GitHub returns 204 No Content on success
+  if (resp.status === 204) return { ok: true, status: 204, detail: "" }; // GitHub: 204 on success
+  let detail = "";
+  try {
+    const j = await resp.json();
+    if (j && j.message) detail = j.message;
+  } catch {
+    /* non-JSON error body */
+  }
+  return { ok: false, status: resp.status, detail: detail.slice(0, 300) };
 }
 
 /** Report the most recent run of the daily screen workflow. */
