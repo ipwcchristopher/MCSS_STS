@@ -21,11 +21,20 @@ ENV_FILE="../.env"
 WRANGLER="npx --yes wrangler@latest"
 
 echo "==> 1/6 Cloudflare login check"
-if ! $WRANGLER whoami >/dev/null 2>&1; then
-  echo "    Not logged in — opening browser login..."
+# NOTE: `wrangler whoami` exits 0 even when NOT logged in, so we must grep its
+# output (not rely on exit code) to decide whether login is needed.
+if $WRANGLER whoami 2>&1 | grep -qi "not authenticated"; then
+  echo "    未登入 Cloudflare — 開瀏覽器登入中..."
+  echo "    >>> 喺彈出嘅瀏覽器撳 [Allow],完成後返嚟呢個視窗 <<<"
   $WRANGLER login
 fi
-$WRANGLER whoami | head -3
+# Verify login actually succeeded before continuing (deploy needs it).
+if $WRANGLER whoami 2>&1 | grep -qi "not authenticated"; then
+  echo "!! 仲未登入到 Cloudflare。請手動行:  npx wrangler login"
+  echo "   喺瀏覽器撳 Allow,見到 'Successfully logged in' 之後,再行 ./deploy.sh"
+  exit 1
+fi
+echo "    ✓ 已登入 Cloudflare"
 
 echo "==> 2/6 Loading Telegram token + chat id from $ENV_FILE"
 set -a; # shellcheck disable=SC1090
