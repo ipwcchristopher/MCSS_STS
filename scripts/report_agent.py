@@ -141,7 +141,7 @@ def _format_stock_block(rank: int, row: Any, pos_cfg: Dict) -> str:
         f"  目標: ${sizing['target']:.2f} (+{sizing['gain_pct']}%)  [2:1 風險回報]",
     ]
 
-    if catalyst_notes and catalyst_notes not in ("dry-run", "GEMINI_API_KEY not set — skipped", ""):
+    if catalyst_notes and catalyst_notes not in ("dry-run", "no AI key", ""):
         lines.append(f"  Catalyst: {catalyst_notes[:120]}")
     if earnings_play:
         lines.append("  ⚠️ <b>EARNINGS RISK</b> — 倉位減半，止損收緊")

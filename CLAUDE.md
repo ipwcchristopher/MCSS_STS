@@ -225,7 +225,7 @@ on:
   workflow_dispatch:          # 容許手動觸發
 ```
 
-密鑰從 GitHub Secrets 注入：`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ANTHROPIC_API_KEY`。
+密鑰從 GitHub Secrets 注入：`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`（CI 嘅 L5 用 Gemini）。`ai_catalyst.py` 係雙引擎：若另設 `ANTHROPIC_API_KEY` 並喺 `daily_screen.yml` 個 `env:` 加返，L5 會優先用 Claude（見上 §6 表）。
 
 ---
 
