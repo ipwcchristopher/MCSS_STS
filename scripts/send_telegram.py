@@ -5,6 +5,7 @@ Secrets from env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import requests
@@ -39,6 +40,11 @@ def send_message(message: str, dry_run: bool = False) -> bool:
         "disable_web_page_preview": True,
     }
     resp = requests.post(url, json=payload, timeout=30)
+    if not resp.ok:
+        # Surface Telegram's actual reason (e.g. "bot can't initiate conversation
+        # with a user that hasn't started it") — the bare status line hides it.
+        print(f"[send_telegram] Telegram API {resp.status_code}: {resp.text}",
+              file=sys.stderr)
     resp.raise_for_status()
     return True
 

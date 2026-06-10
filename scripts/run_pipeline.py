@@ -123,7 +123,17 @@ def main() -> None:
 
     # --- Stage 6: Report + Telegram — Phase 4 ---
     ok = run_script("report_agent.py", dry_run_flag)
-    run_record["stages"]["report_agent"] = "pass" if ok else "warn"
+    run_record["stages"]["report_agent"] = "pass" if ok else "fail"
+
+    # On a LIVE run, a delivery failure must surface as RED — otherwise the run
+    # finishes green with nothing delivered (the exact silent failure the
+    # workflow's "Verify Telegram secrets" guard exists to prevent). Dry runs only
+    # print, so a non-ok there is not a real delivery failure and stays green.
+    if not ok and not args.dry_run:
+        log("PIPELINE", "FAIL", "Report delivery failed on a live run — see traceback above")
+        run_record["result"] = "DELIVERY_FAILED"
+        (DATA_DIR / "pipeline_run.json").write_text(json.dumps(run_record, indent=2))
+        sys.exit(1)
 
     run_record["result"] = "COMPLETE"
     (DATA_DIR / "pipeline_run.json").write_text(json.dumps(run_record, indent=2))

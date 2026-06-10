@@ -49,6 +49,11 @@ env:
   TELEGRAM_CHAT_ID: "${{ secrets.TELEGRAM_CHAT_ID }}"
   ALPACA_API_KEY: "${{ secrets.ALPACA_API_KEY }}"
   ALPACA_API_SECRET: "${{ secrets.ALPACA_API_SECRET }}"
+  # DRY is assigned at runtime via $GITHUB_ENV in the "Resolve session and dry-run
+  # mode" step. Declared here with a fail-safe default ("false" = treat as live run)
+  # so the Actions linter knows env.DRY exists — silences the false-positive
+  # "Context access might be invalid: DRY". The runtime write always overrides it.
+  DRY: "false"
 
 jobs:
   screen:
