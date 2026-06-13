@@ -25,13 +25,20 @@
 
 | Agent | 檔案 | 職責 | 輸入 → 輸出 |
 |-------|------|------|------------|
-| **Market Gate** | `market_gate.py` | 檢查大市方向，熊市中止 | 市場數據 → PASS/HALT |
+| **Market Gate** | `market_gate.py` | 檢查大市方向，熊市中止（唔再自己發 TG）| 市場數據 → PASS/HALT JSON |
 | **Data** | `fetch_universe.py` | 抓全市場 OHLCV + 基本面 | tickers → DataFrame |
 | **Fundamental** | `fundamental_filter.py` | L1+L2 硬篩（universe + 基本面）| ~5000 → ~120隻 |
 | **Technical** | `technical_filter.py` | L3 技術 + Trend Template + RS | ~120 → ~30隻 |
 | **Quant Scoring** | `quant_scoring.py` | L4 100分制評分 | ~30 → Top 12 |
-| **AI Catalyst** | `ai_catalyst.py` | L5 新聞情緒 + catalyst | Top 12 → Top 5 |
-| **Report** | `report_agent.py` | 格式化 + push Telegram | Top 5 → TG message |
+| **AI Catalyst** | `ai_catalyst.py` | L5 新聞情緒 + catalyst（headlines 由 `catalyst_sources.py` 供）| Top 12 → Top 5 |
+| **Day Trade** | `day_trade_screen.py` | ORB watchlist（收市後）/ Gap & Go（開市前）| universe → Top 5 候選 |
+| **Market Brief** | `market_brief.py` | 板塊 RS 排名 + 大市頭條（每 session 都跑）| ETF/RSS → brief JSON |
+| **Catalyst Sources** | `catalyst_sources.py` | 免費新聞聚合（共用 module，唔做評分）| ticker → headlines |
+| **Report** | `report_agent.py` | 組裝 combined message + push Telegram（>4096 字自動分拆）| 全部 → TG message |
+
+> **Swing 同 Day Trade 並行**：swing L1–L5 流程不變；day trade 係**獨立 track**（唔影響 swing），由 `day_trade_screen.py` 跑。兩個開關：`day_trade.enabled`（出唔出 section）同 `day_trade.tradeable`（係咪當可交易信號出 entry/risk）。Market brief 每次都跑，0 隻入選或 Gate HALT 時照俾板塊/新聞 context。
+>
+> ⚠️ **Backtest 結論（2026-06-13，6 個月重演）**：ORB out-of-sample 過 gate 但 in-sample 蝕錢（regime-dependent，非穩定 edge）；Gap & Go 失敗。決定 = **資訊版 watchlist**：`enabled: true` + `tradeable: false` → section 以「異動掃描 · 資訊參考」出現，**唔出 entry/stop/target、唔當交易信號**。要當可交易先重跑 `backtest_daytrade.py`（本地，唔入 CI）三重 gate 過晒,再較 `tradeable: true`。
 
 **Orchestrator**：CI = `scripts/run_pipeline.py`（GitHub Actions 入口）；本地 = `mcss-orchestrator` agent。任一 stage fail 要 graceful degradation（記 log，唔好 crash 成個 pipeline）。
 
@@ -49,8 +56,9 @@ PASS 條件（全部成立）:
   - SPY 50 EMA > SPY 200 EMA
   - VIX < 30
 FAIL 動作:
-  - 中止主 pipeline
-  - Telegram 發「⚠️ 市場警戒，建議持現金」
+  - 中止個股 screening（swing + day trade 都唔出）
+  - 但照跑 market_brief.py → report_agent.py --halt
+  - Telegram 發「⚠️ 市場警戒」+ 板塊 RS + 大市頭條 + 持現金建議
 ```
 
 ### L1 — Universe Filter（Hard Filter）
@@ -130,6 +138,51 @@ Short Squeeze Bonus:  +5分   # 只在 short_float>15% AND momentum強
 - 報告加 ⚠️ EARNINGS RISK 標籤
 ```
 
+### Day Trade Track（獨立於 swing，`enabled`=出 section / `tradeable`=當信號）
+```
+ORB（收市後跑，出明日 watchlist）— day_trade_screen.py --mode orb:
+  - price ≥ 5, avg_volume_20d ≥ 1M, quote_type = EQUITY
+  - RVOL (今日量/20日均) ≥ 1.5
+  - ATR(14)/price ≥ 2.5%   # 日內波幅夠大
+  - |當日升跌%| ≥ 3  OR  RVOL ≥ 2.5
+  - 收市價喺當日波幅頂 30% 內（強勢收市）
+  - 排名: RVOL × |升跌%|, 取 Top 5
+  交易參考: 次日開市首 15 分鐘 range 突破; stop = OR low 或 ATR×1（較窄者）; target 2R; 唔過夜
+
+Gap & Go（開市前跑）— day_trade_screen.py --mode gap:
+  - gap% ≥ 3 AND gap% ≤ 12   # >12% 排除 = FOMO 護欄
+  - price ≥ 5, 昨日 avg_volume_20d ≥ 1M, EQUITY
+  - 數據源: Alpaca snapshot (主) / yfinance prepost (後備)
+  - 排名 gap%, 取 Top 5
+  風險 1%/注（比 swing 2% 細）; 唔過夜
+
+「當可交易信號」門檻（backtest_daytrade.py, out-of-sample 三個都要過）:
+  - win_rate ≥ 45%   - expectancy ≥ 0.15R   - profit_factor ≥ 1.3
+  過 → tradeable: true（出 entry/stop/target）; 唔過 → tradeable: false（資訊版）
+  ⚠️ 留意 in-sample 都要正,唔好淨睇 out-of-sample（regime 撞彩風險）
+```
+
+### Catalyst Sources（免費新聞聚合）— `catalyst_sources.py`
+```
+keyless（永遠可用）:  yfinance Ticker.news, Google News RSS, SEC EDGAR Form 4
+key 增強（optional）:  Finnhub /company-news (FINNHUB_API_KEY), NewsAPI (NEWSAPI_KEY)
+- get_ticker_news(): 合併 + 去重(normalize title) + 時間窗過濾 + 設上限
+- get_market_news(): Google business RSS + Finnhub general
+- 每個 source try/except 回 [] — 任何 source 死都唔影響 pipeline
+- RSS 用 defusedxml parse（防 XXE/billion-laughs）
+- 用家: ai_catalyst.py(L5 headlines) / day_trade_screen.py(catalyst note) / market_brief.py
+```
+
+### Market Brief（每 session 都跑）— `market_brief.py`
+```
+- 板塊 RS: 11 隻 SPDR ETF (XLK XLY XLV XLF XLI XLP XLE XLU XLB XLRE XLC) vs SPY
+           計 1d/5d/20d 相對回報 → composite 排名 → 最強/最弱 3 個
+- 大市頭條: catalyst_sources.get_market_news() top 5
+- 可選 Gemini 一段中文 summary（冇 key graceful skip，維持 $0）
+- 輸出 data/market_brief.json
+- report_agent 用法: 正常日出板塊 strip; 0隻入選 / Gate HALT 出完整 brief
+```
+
 ---
 
 ## 4. 心理護欄（唔可妥協）
@@ -182,12 +235,15 @@ position_value = shares * entry
 | 數據 | `yfinance` | 主要數據源，$0 |
 | 技術指標 | `pandas-ta` | RSI/EMA/ATR/BB |
 | 數據處理 | `pandas`, `numpy` | — |
-| 新聞 | `NewsAPI` (free tier) | L5 用 |
-| AI 分析 | CI: `google-generativeai` (Gemini `gemini-1.5-flash`) / 本地: Claude.ai subscription | L5 用，可選。`ai_catalyst.py` 支援雙引擎：有 `ANTHROPIC_API_KEY` 用 Claude `claude-sonnet-4-6`，否則用 `GEMINI_API_KEY`。GitHub Actions 只設 `GEMINI_API_KEY`；本地 `mcss-catalyst-analyst` agent 行 subscription（免 API 費） |
+| 新聞（keyless）| `yfinance` news + Google News RSS | `catalyst_sources.py` 主力，$0 無 key |
+| 新聞（key 增強）| `Finnhub` / `NewsAPI` (free tier) | optional，`FINNHUB_API_KEY` / `NEWSAPI_KEY`；冇就 keyless |
+| RSS 解析 | `defusedxml` | 防 XXE/billion-laughs（外部 RSS）|
+| Day trade 數據 | `alpaca-py` (IEX) | gap snapshot + backtest minute bars，free tier，$0 |
+| AI 分析 | CI: `google-generativeai` (Gemini `gemini-1.5-flash`) / 本地: Claude.ai subscription | L5 + market brief summary。`ai_catalyst.py` 雙引擎：有 `ANTHROPIC_API_KEY` 用 Claude `claude-sonnet-4-6`，否則 `GEMINI_API_KEY`。GitHub Actions 只設 `GEMINI_API_KEY`；本地 agent 行 subscription |
 | Insider | SEC EDGAR (免費 API) | Form 4 |
-| 推送 | `python-telegram-bot` | $0 |
+| 推送 | `python-telegram-bot` | $0；>4096 字自動分拆 |
 | 排程 | GitHub Actions | $0 |
-| 測試 | `pytest` | — |
+| 測試 | `pytest` | 90 tests（38 原有 + 52 新）|
 
 ---
 
@@ -225,7 +281,11 @@ on:
   workflow_dispatch:          # 容許手動觸發
 ```
 
-密鑰從 GitHub Secrets 注入：`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`（CI 嘅 L5 用 Gemini）。`ai_catalyst.py` 係雙引擎：若另設 `ANTHROPIC_API_KEY` 並喺 `daily_screen.yml` 個 `env:` 加返，L5 會優先用 Claude（見上 §6 表）。
+密鑰從 GitHub Secrets 注入：
+- **必要**：`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`（CI 嘅 L5 用 Gemini）
+- **可選**：`ALPACA_API_KEY` + `ALPACA_API_SECRET`（gap mode + 更精準 universe）；`FINNHUB_API_KEY`（catalyst 增強）；`NEWSAPI_KEY`（多一個新聞源）；`ANTHROPIC_API_KEY`（L5 改用 Claude，需喺 `env:` 加返）
+
+冇任何 optional key 都跑得（keyless catalyst + yfinance 後備）。`ai_catalyst.py` 雙引擎見上 §6 表。
 
 ---
 

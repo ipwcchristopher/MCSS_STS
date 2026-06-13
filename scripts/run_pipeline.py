@@ -87,7 +87,18 @@ def main() -> None:
     ok = run_script("market_gate.py")
     run_record["stages"]["market_gate"] = "pass" if ok else "fail"
     if ok and check_halt(DATA_DIR / "market_gate_result.json"):
-        log("PIPELINE", "HALT", "Gate 0 conditions not met — stopping pipeline")
+        log("PIPELINE", "HALT", "Gate 0 conditions not met — sending market brief only")
+        # No stock screening on HALT, but the user still gets sector/news context
+        ok = run_script("market_brief.py", dry_run_flag)
+        run_record["stages"]["market_brief"] = "pass" if ok else "warn"
+        ok = run_script("report_agent.py",
+                        ["--halt", "--session", args.session] + dry_run_flag)
+        run_record["stages"]["report_agent"] = "pass" if ok else "fail"
+        if not ok and not args.dry_run:
+            log("PIPELINE", "FAIL", "HALT brief delivery failed on a live run")
+            run_record["result"] = "DELIVERY_FAILED"
+            (DATA_DIR / "pipeline_run.json").write_text(json.dumps(run_record, indent=2))
+            sys.exit(1)
         run_record["result"] = "HALT"
         (DATA_DIR / "pipeline_run.json").write_text(json.dumps(run_record, indent=2))
         sys.exit(0)
@@ -121,8 +132,17 @@ def main() -> None:
     ok = run_script("ai_catalyst.py", dry_run_flag)
     run_record["stages"]["ai_catalyst"] = "pass" if ok else "warn"
 
-    # --- Stage 6: Report + Telegram — Phase 4 ---
-    ok = run_script("report_agent.py", dry_run_flag)
+    # --- Stage 6: Day Trade Screen (orb post-market / gap pre-market) ---
+    dt_mode = "gap" if args.session == "pre-market" else "orb"
+    ok = run_script("day_trade_screen.py", ["--mode", dt_mode] + dry_run_flag)
+    run_record["stages"]["day_trade_screen"] = "pass" if ok else "warn"
+
+    # --- Stage 7: Market Brief (sector RS + headlines, all sessions) ---
+    ok = run_script("market_brief.py", dry_run_flag)
+    run_record["stages"]["market_brief"] = "pass" if ok else "warn"
+
+    # --- Stage 8: Report + Telegram ---
+    ok = run_script("report_agent.py", ["--session", args.session] + dry_run_flag)
     run_record["stages"]["report_agent"] = "pass" if ok else "fail"
 
     # On a LIVE run, a delivery failure must surface as RED — otherwise the run

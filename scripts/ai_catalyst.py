@@ -9,8 +9,8 @@ AI analysis priority (graceful fallback):
   2. GEMINI_API_KEY set    → Gemini gemini-1.5-flash, 12 tickers in parallel (via thread pool)
   3. Neither set           → pass through L4 ranking unchanged
 
-Other env vars (optional):
-  NEWSAPI_KEY  — provides headlines for AI to analyze
+Headlines come from catalyst_sources.py (yfinance + Google News RSS keyless;
+FINNHUB_API_KEY / NEWSAPI_KEY optionally enrich).
 """
 
 import asyncio
@@ -29,6 +29,8 @@ import yaml
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+
+import catalyst_sources
 
 _THREAD_POOL = ThreadPoolExecutor(max_workers=16)
 
@@ -57,39 +59,6 @@ def _check_insider_buying(ticker: str, window_days: int = 30) -> bool:
         return count > 0
     except Exception:
         return False
-
-
-# ── NewsAPI ────────────────────────────────────────────────────────────────────
-
-def _fetch_news(
-    ticker: str,
-    company_name: str,
-    newsapi_key: str,
-    window_days: int = 7,
-) -> List[str]:
-    """Return list of recent headline strings for the ticker."""
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=window_days)
-    query = f"{ticker} OR \"{company_name}\"" if company_name else ticker
-
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": query,
-        "from": start.strftime("%Y-%m-%d"),
-        "to": end.strftime("%Y-%m-%d"),
-        "language": "en",
-        "sortBy": "relevancy",
-        "pageSize": 10,
-        "apiKey": newsapi_key,
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=15)
-        if resp.status_code != 200:
-            return []
-        articles = resp.json().get("articles", [])
-        return [f"{a.get('title', '')} — {a.get('description', '')}" for a in articles[:8]]
-    except Exception:
-        return []
 
 
 # ── Shared prompt builder ──────────────────────────────────────────────────────
@@ -198,7 +167,8 @@ def _analyze_with_gemini_sync(
 async def _process_ticker_async(
     row: "pd.Series",
     cfg: Dict,
-    newsapi_key: str,
+    news_window: int,
+    max_headlines: int,
     insider_window: int,
     insider_pts: int,
     sector_rs_pts: int,
@@ -242,13 +212,15 @@ async def _process_ticker_async(
     else:
         details["vcp_breakout"] = False
 
-    # NewsAPI (blocking HTTP → thread pool)
-    headlines: List[str] = []
-    if newsapi_key:
-        headlines = await loop.run_in_executor(
-            _THREAD_POOL, _fetch_news, ticker, company_name, newsapi_key, 7
-        )
-        details["news_count"] = len(headlines)
+    # Free news sources via catalyst_sources (keyless yfinance + Google RSS;
+    # Finnhub and NewsAPI used only when their keys are set).
+    # (blocking HTTP → thread pool)
+    headline_dicts = await loop.run_in_executor(
+        _THREAD_POOL, catalyst_sources.get_ticker_news,
+        ticker, company_name, news_window, max_headlines,
+    )
+    headlines: List[str] = catalyst_sources.headlines_to_strings(headline_dicts)
+    details["news_count"] = len(headlines)
 
     # AI analysis — Claude (async) or Gemini (sync via executor)
     if claude_client is not None:
@@ -293,7 +265,9 @@ async def main_async(args: argparse.Namespace, l4: "pd.DataFrame", cfg: Dict) ->
     insider_pts = int(l5_cfg.get("insider_buying_points", 1))
     sector_rs_pts = int(l5_cfg.get("sector_rs_strong_points", 1))
     vcp_breakout_pts = int(l5_cfg.get("vcp_breakout_points", 1))
-    newsapi_key = os.environ.get("NEWSAPI_KEY", "")
+    cs_cfg = cfg.get("catalyst_sources", {})
+    news_window = int(cs_cfg.get("ticker_news_window_days", 7))
+    max_headlines = int(cs_cfg.get("max_headlines_per_ticker", 8))
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
 
@@ -335,7 +309,7 @@ async def main_async(args: argparse.Namespace, l4: "pd.DataFrame", cfg: Dict) ->
     async def _run_with_client(client: Optional[Any]) -> List[Any]:
         tasks = [
             _process_ticker_async(
-                row, cfg, newsapi_key,
+                row, cfg, news_window, max_headlines,
                 insider_window, insider_pts, sector_rs_pts, vcp_breakout_pts,
                 claude_client=client,
                 gemini_key=gemini_key if client is None else "",

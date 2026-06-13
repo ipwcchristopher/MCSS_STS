@@ -60,6 +60,10 @@ l4_scoring:
   min_total_score: 60
   top_n: 12
 
+catalyst_sources:
+  ticker_news_window_days: 7
+  max_headlines_per_ticker: 8
+
 l5_catalyst:
   analyst_upgrade_window_days: 7
   analyst_upgrade_points: 2
@@ -74,6 +78,44 @@ l5_catalyst:
   analyst_downgrade_window_days: 7
   analyst_downgrade_points: -2
   top_n_final: 5
+
+day_trade:
+  enabled: true           # show the 異動掃描 section in the TG message
+  tradeable: false        # info-only framing; flip true ONLY after backtest gates pass
+                          # (2026-06-13 6mo replay: ORB edge regime-dependent, in-sample
+                          #  negative; Gap failed → kept as informational watchlist)
+  orb:
+    min_price: 5
+    min_avg_volume_20d: 1000000
+    min_rvol: 1.5
+    min_atr_pct: 2.5
+    min_change_pct: 3
+    strong_rvol_override: 2.5   # huge volume qualifies even without the % move
+    close_range_top_pct: 30
+    top_n: 5
+  gap:
+    min_gap_pct: 3
+    max_gap_pct: 12             # FOMO guardrail: extreme gaps excluded
+    min_price: 5
+    min_avg_volume_20d: 1000000
+    top_n: 5
+  risk_per_trade_pct: 1
+  backtest:
+    lookback_months: 6
+    out_of_sample_months: 2     # gates judged on this most-recent slice only
+    opening_range_minutes: 15   # ORB strategy opening range
+    gap_or_minutes: 5           # Gap & Go entry range after open
+    target_r: 2.0
+    gates:
+      min_win_rate_pct: 45
+      min_expectancy_r: 0.15
+      min_profit_factor: 1.3
+
+market_brief:
+  sector_etfs: [XLK, XLY, XLV, XLF, XLI, XLP, XLE, XLU, XLB, XLRE, XLC]
+  benchmark: SPY
+  lookback_days: [1, 5, 20]
+  headline_count: 5
 
 position_sizing:
   risk_per_trade_pct: 2
