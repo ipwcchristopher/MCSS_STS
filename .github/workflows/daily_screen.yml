@@ -49,6 +49,8 @@ env:
   TELEGRAM_CHAT_ID: "${{ secrets.TELEGRAM_CHAT_ID }}"
   ALPACA_API_KEY: "${{ secrets.ALPACA_API_KEY }}"
   ALPACA_API_SECRET: "${{ secrets.ALPACA_API_SECRET }}"
+  FINNHUB_API_KEY: "${{ secrets.FINNHUB_API_KEY }}"   # optional: catalyst enrichment
+  NEWSAPI_KEY: "${{ secrets.NEWSAPI_KEY }}"           # optional: extra news source
   # DRY is assigned at runtime via $GITHUB_ENV in the "Resolve session and dry-run
   # mode" step. Declared here with a fail-safe default ("false" = treat as live run)
   # so the Actions linter knows env.DRY exists — silences the false-positive

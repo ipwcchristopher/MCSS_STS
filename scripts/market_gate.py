@@ -21,7 +21,6 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from fetch_market_indicators import fetch_indicator
-from send_telegram import send_message
 
 
 def _check_gate(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -128,19 +127,9 @@ def main() -> None:
     print(f"  VIX:  {vix_val if vix_val else '?':>8} vs max    {conds.get('vix_max', 30):>8}  {'✓' if conds.get('vix_below_max') else '✗'}")
     print(f"Gate 0 → {status}" + (f": {result['reason']}" if result.get("reason") else ""))
 
-    if status == "HALT" and not args.dry_run:
-        vix_str = f" (VIX: {vix_val})" if vix_val else ""
-        msg = (
-            f"⚠️ <b>MCSS Market Alert</b>\n\n"
-            f"Gate 0 HALT — pipeline stopped.\n"
-            f"Reason: {result['reason']}{vix_str}\n\n"
-            f"<i>市場警戒，建議持現金，等待市況改善。</i>"
-        )
-        try:
-            send_message(msg, dry_run=False)
-            print("Telegram HALT alert sent.")
-        except Exception as exc:
-            print(f"Telegram alert failed (non-fatal): {exc}")
+    # On HALT, messaging is handled downstream: run_pipeline.py runs
+    # market_brief.py + report_agent.py --halt so the user gets a full
+    # market brief instead of a bare warning (single message per run).
 
     # Always exit 0 — run_pipeline.py reads the JSON to decide halt vs continue
     sys.exit(0)

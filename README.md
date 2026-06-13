@@ -8,11 +8,13 @@
 
 | 痛點 | 解決方案 |
 |------|----------|
-| 唔知每日買咩 | 每日自動 screen 全市場 → Top 5 |
+| 唔知每日買咩 | 每日自動 screen 全市場 → Top 5 swing |
 | 靠直覺交易 → 持續虧損 | 量化規則取代情緒決策 |
 | FOMO 追高、唔 cut loss | 心理護欄硬編碼入系統（RSI > 72 封鎖等） |
 | 冇時間盯盤 | 收市後自動分析，Telegram 推送 |
 | 想要 entry/stop/target | 系統自動計算建議價位 |
+| 想知邊隻異動、有咩 catalyst | 每日 day trade 異動掃描（ORB / gap）+ 免費新聞 catalyst |
+| 0 隻入選嗰日一片空白 | 照出板塊 RS 雷達 + 大市頭條，「留意板塊」提示 |
 
 **設計哲學：** Criteria 過關只係「入場資格」，唔等於「必賺」。系統最大價值係幫你**冷靜、有紀律、精準出手**。
 
@@ -82,7 +84,11 @@
 | yfinance（股價/基本面數據）| **$0** |
 | Telegram Bot（推送）| **$0** |
 | pandas-ta / numpy（技術指標）| **$0** |
+| Catalyst 新聞（yfinance + Google News RSS）| **$0**（keyless）|
+| 板塊 RS（SPDR ETF 數據）| **$0** |
+| Day trade 掃描 + backtest（Alpaca IEX）| **$0**（free tier）|
 | **Lite 版小計** | **$0/月** ✅ |
+| Catalyst 增強（可選）— Finnhub / NewsAPI free tier | **$0**（額度內）|
 | L5 AI 情緒分析（可選）— Gemini `gemini-1.5-flash` | **~$0**（free tier 額度內，CI 預設）|
 | L5 AI 情緒分析（可選）— Claude `claude-sonnet-4-6`（質素更高）| ~$5–15/月 |
 | **AI-enhanced 版小計** | **$0–15/月** |
@@ -140,12 +146,16 @@ ANTHROPIC_API_KEY=你嘅claude_key（可選，若設則 L5 優先用 Claude）
 ```
 TELEGRAM_BOT_TOKEN   = 你嘅 bot token
 TELEGRAM_CHAT_ID     = 你嘅 chat id
-ALPACA_API_KEY       = 你嘅 Alpaca key（可選，宇宙更精準）
+ALPACA_API_KEY       = 你嘅 Alpaca key（可選，宇宙更精準 + day trade gap 掃描）
 ALPACA_API_SECRET    = 你嘅 Alpaca secret（可選）
 GEMINI_API_KEY       = 你嘅 Gemini key（可選，L5 AI 分析；workflow 預設用呢個）
+FINNHUB_API_KEY      = 你嘅 Finnhub key（可選，catalyst 新聞增強，free tier）
+NEWSAPI_KEY          = 你嘅 NewsAPI key（可選，多一個新聞源，free tier）
 ```
 
 > ℹ️ CI 嘅 L5 預設行 **Gemini**（`daily_screen.yml` 只注入 `GEMINI_API_KEY`）。若想 CI 改用 Claude，要另設 `ANTHROPIC_API_KEY` secret **並**喺 `daily_screen.yml` 個 `env:` 加返佢（`ai_catalyst.py` 有 key 就優先用 Claude）。
+>
+> ℹ️ **Catalyst 新聞唔使任何 key 都跑得**（yfinance + Google News RSS keyless）。`FINNHUB_API_KEY` / `NEWSAPI_KEY` 只係增強，冇就自動 keyless mode。
 
 > 🔒 密鑰只放 GitHub Secrets / `.env`，**永遠唔好** commit 入代碼。
 
@@ -252,7 +262,9 @@ MCSS_STS/
 - [x] **Phase 4**: Telegram Bot + GitHub Actions 部署 (Week 7)
 - [x] **Phase 5**: Backtesting + 優化 (Week 8–10)
 - [x] **Bug fixes**: yfinance 401 rate limit 修正、空 CSV crash 修正、Alpaca env 加載修正
-- [x] **Test suite**: 38 pytest tests 覆蓋 L1–L4、VCP、RS Rating
+- [x] **Day Trade + Catalyst 進化** (2026-06): keyless catalyst 聚合、板塊 RS 雷達、ORB/Gap 異動掃描、combined message、TG 4096 分拆、`--session` bug fix
+  - Day trade backtest（6 個月）：ORB regime-dependent、Gap 失敗 → 定為**資訊版 watchlist**（`tradeable: false`），非交易信號
+- [x] **Test suite**: 90 pytest tests（38 原有 + 52 新）
 - [ ] **Phase 6**: IBKR Auto Trading (未來，可選)
 
 詳細規格見 [`CLAUDE.md`](./CLAUDE.md)。
